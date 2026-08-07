@@ -1,0 +1,20 @@
+from setuptools import find_packages, setup
+
+
+setup(
+    name="knowledge-base-backend",
+    version="0.1.0",
+    packages=find_packages(),
+    install_requires=[
+        "alembic>=1.13.2",
+        "fastapi>=0.115.0",
+        "httpx>=0.28.1",
+        "python-docx>=1.1.2",
+        "pypdf>=5.0.0",
+        "pydantic>=2.8.0",
+        "pydantic-settings>=2.4.0",
+        "python-multipart>=0.0.9",
+        "sqlalchemy>=2.0.32",
+        "uvicorn[standard]>=0.30.0",
+    ],
+)
