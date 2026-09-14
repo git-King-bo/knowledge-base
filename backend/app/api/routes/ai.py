@@ -118,13 +118,14 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     request_text = "\n".join(f"{message.role}: {message.content}" for message in payload.messages)
     started_at = perf_counter()
     try:
-        content = adapter.chat(provider, payload.messages, payload.model, api_key)
+        result = adapter.chat(provider, payload.messages, payload.model, api_key)
         ai_repository.create_activity_log(
             action="chat",
             provider_id=provider.id,
             model=selected_model,
             request_text=request_text,
-            response_text=content,
+            response_text=result.content,
+            usage=result.usage,
             success=True,
             latency_ms=int((perf_counter() - started_at) * 1000),
         )
@@ -142,7 +143,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     return ChatResponse(
         provider_id=provider.id,
         model=selected_model,
-        content=content,
+        content=result.content,
     )
 
 

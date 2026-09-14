@@ -1,21 +1,4 @@
-export type DocumentStatus = 'draft' | 'published'
-
-export interface KnowledgeCategory {
-  id: string
-  name: string
-  count: number
-}
-
-export interface DocumentItem {
-  id: string
-  title: string
-  summary: string
-  content: string
-  categoryId: string
-  tags: string[]
-  status: DocumentStatus
-  updatedAt: string
-}
+export type WebSearchMode = 'knowledge' | 'web' | 'auto'
 
 export interface ProviderConfig {
   id: string
@@ -74,6 +57,14 @@ export interface KnowledgeSearchResult {
   hits: KnowledgeChunk[]
 }
 
+export interface WebSource {
+  index: number
+  title: string
+  url: string
+  snippet: string
+  provider: string
+}
+
 export interface KnowledgeUploadResult {
   source: KnowledgeSource
   chunks: KnowledgeChunk[]
@@ -82,7 +73,7 @@ export interface KnowledgeUploadResult {
 
 export interface AIActivityLog {
   id: string
-  action: 'chat' | 'ask' | 'test'
+  action: 'chat' | 'ask' | 'test' | 'embedding'
   providerId: string
   model: string
   success: boolean

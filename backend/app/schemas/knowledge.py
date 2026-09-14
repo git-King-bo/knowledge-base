@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field
 
 SourceStatus = Literal["uploaded", "parsed", "failed"]
 KnowledgeBaseStatus = Literal["active", "archived"]
-LogAction = Literal["chat", "ask", "test"]
+LogAction = Literal["chat", "ask", "test", "embedding"]
+WebSearchMode = Literal["knowledge", "web", "auto"]
 
 
 class KnowledgeBaseCreate(BaseModel):
@@ -59,10 +60,24 @@ class KnowledgeSearchResult(BaseModel):
     hits: list[KnowledgeChunk]
 
 
+class WebSource(BaseModel):
+    index: int
+    title: str
+    url: str
+    snippet: str = ""
+    provider: str = ""
+
+
 class UploadResponse(BaseModel):
     source: KnowledgeSource
     chunks: list[KnowledgeChunk]
     knowledge_base: KnowledgeBase | None = None
+
+
+class ContinuationContext(BaseModel):
+    answer: str = Field(max_length=200_000)
+    sources: list[KnowledgeChunk] = Field(default_factory=list, max_length=12)
+    web_sources: list[WebSource] = Field(default_factory=list, max_length=20)
 
 
 class AskRequest(BaseModel):
@@ -71,6 +86,8 @@ class AskRequest(BaseModel):
     provider_id: str | None = None
     model: str | None = None
     top_k: int = Field(default=5, ge=1, le=12)
+    web_search_mode: WebSearchMode = "knowledge"
+    continuation: ContinuationContext | None = None
 
 
 class AskResponse(BaseModel):
@@ -78,6 +95,7 @@ class AskResponse(BaseModel):
     provider_id: str
     model: str
     sources: list[KnowledgeChunk]
+    web_sources: list[WebSource] = Field(default_factory=list)
 
 
 class AIActivityLog(BaseModel):

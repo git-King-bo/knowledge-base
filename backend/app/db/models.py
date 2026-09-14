@@ -153,3 +153,15 @@ class AIActivityLogModel(Base):
     request_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     response_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class TokenUsageModel(Base):
+    __tablename__ = "token_usage"
+
+    log_id: Mapped[str] = mapped_column(ForeignKey("ai_activity_logs.id"), primary_key=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cached_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
+    knowledge_base_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)

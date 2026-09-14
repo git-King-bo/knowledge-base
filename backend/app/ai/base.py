@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
+from app.schemas.usage import ChatResult, StreamChunk
 
 from app.schemas.ai import ChatMessage, ProviderConfig, ProviderTestResult
 
@@ -17,5 +19,12 @@ class AIProvider(ABC):
         messages: list[ChatMessage],
         model: str | None = None,
         api_key: str | None = None,
-    ) -> str:
+    ) -> ChatResult:
+        raise NotImplementedError
+
+    @abstractmethod
+    def stream_chat(
+        self, config: ProviderConfig, messages: list[ChatMessage],
+        model: str | None = None, api_key: str | None = None,
+    ) -> AsyncIterator[StreamChunk]:
         raise NotImplementedError

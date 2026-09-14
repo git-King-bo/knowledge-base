@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     default_api_url: str = Field(default="", alias="AGENT_DEFAULT_API_URL")
     default_api_key: str = Field(default="", alias="AGENT_DEFAULT_API_KEY")
     default_api_model: str = Field(default="qwen-plus", alias="AGENT_DEFAULT_MODEL")
+    web_search_enabled: bool = Field(default=False, alias="WEB_SEARCH_ENABLED")
+    web_search_provider: str = Field(default="tavily", alias="WEB_SEARCH_PROVIDER")
+    web_search_api_key: str = Field(default="", alias="WEB_SEARCH_API_KEY")
+    web_search_max_results: int = Field(default=5, alias="WEB_SEARCH_MAX_RESULTS")
+    web_search_timeout_seconds: float = Field(default=10.0, alias="WEB_SEARCH_TIMEOUT_SECONDS")
+    web_search_auto_threshold: float = Field(default=0.35, alias="WEB_SEARCH_AUTO_THRESHOLD")
 
     @property
     def cors_origins(self) -> list[str]:

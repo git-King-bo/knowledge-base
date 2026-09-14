@@ -2,20 +2,18 @@ import json
 import math
 import re
 from collections import Counter
-from datetime import date
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import (
     AIActivityLogModel,
+    TokenUsageModel,
     AIModelModel,
     AIProviderModel,
-    CategoryModel,
-    DocumentModel,
     KnowledgeBaseModel,
     KnowledgeBaseSourceModel,
     KnowledgeChunkEmbeddingModel,
@@ -23,7 +21,7 @@ from app.db.models import (
     KnowledgeSourceModel,
 )
 from app.schemas.ai import ProviderConfig, ProviderCreate, ProviderModel, ProviderModelCreate, ProviderUpdate
-from app.schemas.documents import Category, Document, DocumentCreate, DocumentUpdate
+from app.schemas.usage import TokenUsage
 from app.schemas.knowledge import (
     AIActivityLog,
     KnowledgeBase,
@@ -42,19 +40,6 @@ def _tags_to_list(value: str) -> list[str]:
 
 def _tags_to_text(value: list[str]) -> str:
     return ",".join(item.strip() for item in value if item.strip())
-
-
-def _document_from_model(model: DocumentModel) -> Document:
-    return Document(
-        id=model.id,
-        title=model.title,
-        summary=model.summary,
-        content=model.content,
-        category_id=model.category_id,
-        tags=_tags_to_list(model.tags),
-        status=model.status,  # type: ignore[arg-type]
-        updated_at=model.updated_at,
-    )
 
 
 def _provider_from_model(model: AIProviderModel) -> ProviderConfig:
@@ -82,7 +67,7 @@ def _model_from_model(model: AIModelModel) -> ProviderModel:
 
 
 def _api_key_from_model(model: AIProviderModel) -> str | None:
-    if model.id == "provider-agent-default" and settings.default_api_key:
+    if not model.api_key_encrypted and model.id == "provider-agent-default" and settings.default_api_key:
         return settings.default_api_key
     return model.api_key_encrypted or None
 
@@ -179,88 +164,6 @@ def _log_to_schema(model: AIActivityLogModel) -> AIActivityLog:
     )
 
 
-class KnowledgeRepository:
-    def __init__(self, db: Session) -> None:
-        self.db = db
-
-    def list_categories(self) -> list[Category]:
-        count_subquery = (
-            select(DocumentModel.category_id, func.count(DocumentModel.id).label("document_count"))
-            .group_by(DocumentModel.category_id)
-            .subquery()
-        )
-        rows = self.db.execute(
-            select(CategoryModel, count_subquery.c.document_count)
-            .outerjoin(count_subquery, CategoryModel.id == count_subquery.c.category_id)
-            .order_by(CategoryModel.name)
-        ).all()
-        return [
-            Category(id=category.id, name=category.name, count=document_count or 0)
-            for category, document_count in rows
-        ]
-
-    def list_documents(self, q: str | None = None, category_id: str | None = None) -> list[Document]:
-        statement: Select[tuple[DocumentModel]] = select(DocumentModel).order_by(
-            DocumentModel.updated_at.desc(), DocumentModel.title.asc()
-        )
-        if category_id:
-            statement = statement.where(DocumentModel.category_id == category_id)
-        if q and q.strip():
-            keyword = f"%{q.strip()}%"
-            statement = statement.where(
-                or_(
-                    DocumentModel.title.ilike(keyword),
-                    DocumentModel.summary.ilike(keyword),
-                    DocumentModel.content.ilike(keyword),
-                    DocumentModel.tags.ilike(keyword),
-                )
-            )
-        return [_document_from_model(item) for item in self.db.scalars(statement).all()]
-
-    def get_document(self, document_id: str) -> Document | None:
-        model = self.db.get(DocumentModel, document_id)
-        return _document_from_model(model) if model else None
-
-    def create_document(self, payload: DocumentCreate) -> Document:
-        model = DocumentModel(
-            id=str(uuid4()),
-            title=payload.title,
-            summary=payload.summary,
-            content=payload.content,
-            category_id=payload.category_id,
-            tags=_tags_to_text(payload.tags),
-            status=payload.status,
-            updated_at=date.today(),
-        )
-        self.db.add(model)
-        self.db.commit()
-        self.db.refresh(model)
-        return _document_from_model(model)
-
-    def update_document(self, document_id: str, payload: DocumentUpdate) -> Document | None:
-        model = self.db.get(DocumentModel, document_id)
-        if not model:
-            return None
-
-        updates = payload.model_dump(exclude_unset=True)
-        if "tags" in updates and updates["tags"] is not None:
-            updates["tags"] = _tags_to_text(updates["tags"])
-        for key, value in updates.items():
-            setattr(model, key, value)
-        model.updated_at = date.today()
-        self.db.commit()
-        self.db.refresh(model)
-        return _document_from_model(model)
-
-    def delete_document(self, document_id: str) -> bool:
-        model = self.db.get(DocumentModel, document_id)
-        if not model:
-            return False
-        self.db.delete(model)
-        self.db.commit()
-        return True
-
-
 class AIRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -329,7 +232,7 @@ class AIRepository:
         if not model:
             return None
 
-        updates = payload.model_dump(exclude_unset=True)
+        updates = payload.model_dump(exclude_unset=True, exclude_none=True)
         if updates.get("is_default") is True:
             self._clear_default_provider()
         if "api_key" in updates:
@@ -383,6 +286,8 @@ class AIRepository:
         response_text: str,
         success: bool,
         latency_ms: int,
+        usage: TokenUsage | None = None,
+        knowledge_base_id: str | None = None,
     ) -> AIActivityLog:
         record = AIActivityLogModel(
             id=str(uuid4()),
@@ -396,6 +301,9 @@ class AIRepository:
             created_at=_now(),
         )
         self.db.add(record)
+        self.db.flush()
+        self.db.add(TokenUsageModel(log_id=record.id, knowledge_base_id=knowledge_base_id,
+                                    **(usage or TokenUsage()).model_dump()))
         self.db.commit()
         self.db.refresh(record)
         return _log_to_schema(record)
@@ -455,7 +363,7 @@ class KnowledgeIngestionRepository:
         record = self.db.get(KnowledgeBaseModel, knowledge_base_id)
         if not record:
             return None
-        updates = payload.model_dump(exclude_unset=True)
+        updates = payload.model_dump(exclude_unset=True, exclude_none=True)
         if "tags" in updates and updates["tags"] is not None:
             updates["tags"] = _tags_to_text(updates["tags"])
         for key, value in updates.items():
@@ -694,11 +602,12 @@ class KnowledgeIngestionRepository:
             KnowledgeChunkEmbeddingModel,
             KnowledgeChunkModel.id == KnowledgeChunkEmbeddingModel.chunk_id,
         )
+        active_sources = select(KnowledgeBaseSourceModel.source_id).join(
+            KnowledgeBaseModel, KnowledgeBaseModel.id == KnowledgeBaseSourceModel.knowledge_base_id
+        ).where(KnowledgeBaseModel.status == "active")
         if knowledge_base_id:
-            statement = statement.join(
-                KnowledgeBaseSourceModel,
-                KnowledgeBaseSourceModel.source_id == KnowledgeChunkModel.source_id,
-            ).where(KnowledgeBaseSourceModel.knowledge_base_id == knowledge_base_id)
+            active_sources = active_sources.where(KnowledgeBaseModel.id == knowledge_base_id)
+        statement = statement.where(KnowledgeChunkModel.source_id.in_(active_sources))
         rows = self.db.execute(statement).all()
         results: list[KnowledgeChunk] = []
         for record, embedding in rows:

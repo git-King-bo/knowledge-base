@@ -62,7 +62,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] = Field(min_length=1, max_length=100)
     provider_id: str | None = None
     model: str | None = None
 

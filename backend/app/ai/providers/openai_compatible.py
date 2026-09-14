@@ -1,4 +1,6 @@
-from urllib.parse import urljoin
+import json
+
+from app.schemas.usage import ChatResult, TokenUsage, StreamChunk
 
 import httpx
 
@@ -7,11 +9,7 @@ from app.schemas.ai import ChatMessage, ProviderConfig, ProviderTestResult
 
 
 class OpenAICompatibleProvider(AIProvider):
-    """Placeholder for OpenAI-compatible chat APIs.
-
-    DeepSeek, Qwen and OpenAI-compatible gateways can share this adapter once
-    credentials and HTTP client wiring are added.
-    """
+    """Chat adapter preserving provider-reported usage for every response."""
 
     provider_name = "openai-compatible"
 
@@ -49,7 +47,7 @@ class OpenAICompatibleProvider(AIProvider):
         messages: list[ChatMessage],
         model: str | None = None,
         api_key: str | None = None,
-    ) -> str:
+    ) -> ChatResult:
         selected_model = model or config.default_model
         payload = {
             "model": selected_model,
@@ -73,9 +71,55 @@ class OpenAICompatibleProvider(AIProvider):
             message = choice.get("message") or {}
             content = message.get("content")
             if content:
-                return content
+                return ChatResult(content=content, usage=TokenUsage.from_response(data))
             delta = choice.get("delta") or {}
             if delta.get("content"):
-                return delta["content"]
+                return ChatResult(content=delta["content"], usage=TokenUsage.from_response(data))
 
-        return str(data)
+        raise RuntimeError("Provider returned no answer content")
+
+    def _async_client(self, config: ProviderConfig) -> httpx.AsyncClient:
+        return httpx.AsyncClient(base_url=config.base_url.rstrip("/"), timeout=60.0)
+
+    async def stream_chat(self, config, messages, model=None, api_key=None):
+        payload = {
+            "model": model or config.default_model,
+            "messages": [message.model_dump() for message in messages],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "temperature": 0.2,
+        }
+        async with self._async_client(config) as client:
+            async with client.stream("POST", "/chat/completions",
+                                     headers=self._auth_headers(api_key), json=payload) as response:
+                response.raise_for_status()
+                if "text/event-stream" not in response.headers.get("content-type", "").lower():
+                    raise RuntimeError("Provider did not return an event stream")
+                fields = []
+                size = 0
+                async for line in response.aiter_lines():
+                    if line == "":
+                        if not fields:
+                            continue
+                        text = "\n".join(fields)
+                        fields, size = [], 0
+                        if text.strip() == "[DONE]":
+                            return
+                        data = json.loads(text)
+                        if not isinstance(data, dict) or data.get("error"):
+                            raise RuntimeError("Provider returned a streaming error")
+                        choices = data.get("choices") or []
+                        delta = ""
+                        if choices:
+                            delta = (choices[0].get("delta") or {}).get("content") or ""
+                            if not isinstance(delta, str):
+                                raise RuntimeError("Invalid text delta from provider")
+                        yield StreamChunk(delta=delta,
+                            usage=TokenUsage.from_response(data) if isinstance(data.get("usage"), dict) else None)
+                    elif line.startswith("data:"):
+                        field = line[5:]
+                        fields.append(field[1:] if field.startswith(" ") else field)
+                        size += len(field)
+                        if size > 1_000_000:
+                            raise RuntimeError("Provider stream event exceeds size limit")
+                raise RuntimeError("Provider stream ended before its completion marker")
