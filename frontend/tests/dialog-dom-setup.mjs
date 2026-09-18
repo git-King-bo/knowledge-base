@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom'
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true })
-for (const key of ['window', 'document', 'Element', 'HTMLElement', 'SVGElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLCanvasElement', 'HTMLDialogElement', 'Event', 'MouseEvent', 'getComputedStyle']) globalThis[key] = dom.window[key]
+for (const key of ['window', 'document', 'Document', 'ShadowRoot', 'Element', 'HTMLElement', 'SVGElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLCanvasElement', 'HTMLDialogElement', 'Event', 'MouseEvent', 'getComputedStyle']) globalThis[key] = dom.window[key]
 Object.assign(globalThis, { innerWidth: 1200, innerHeight: 900, devicePixelRatio: 1 })
 dom.window.CSSStyleDeclaration.prototype[Symbol.iterator] = function* () { for (let i = 0; i < this.length; i++) yield this[i] }
 HTMLDialogElement.prototype.showModal = function () { this.open = true }

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from docx import Document as DocxDocument
+from openpyxl import load_workbook
 from pypdf import PdfReader
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+|[\u4e00-\u9fff]")
@@ -37,6 +38,7 @@ def guess_mime_type(filename: str) -> str:
         ".md": "text/markdown",
         ".markdown": "text/markdown",
         ".csv": "text/csv",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ".json": "application/json",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ".pdf": "application/pdf",
@@ -49,6 +51,8 @@ def parse_uploaded_file(filename: str, data: bytes) -> ParsedDocument:
         text = data.decode("utf-8", errors="ignore")
     elif suffix == ".csv":
         text = _parse_csv(data)
+    elif suffix == ".xlsx":
+        text = _parse_xlsx(data)
     elif suffix == ".json":
         text = _parse_json(data)
     elif suffix == ".docx":
@@ -148,6 +152,25 @@ def _parse_csv(data: bytes) -> str:
     for row in body:
         lines.append(", ".join(row))
     return "\n".join(lines)
+
+
+def _parse_xlsx(data: bytes) -> str:
+    workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    try:
+        sheets: list[str] = []
+        for sheet in workbook.worksheets:
+            lines: list[str] = []
+            for row in sheet.iter_rows(values_only=True):
+                cells = [str(value).strip() if value is not None else "" for value in row]
+                while cells and not cells[-1]:
+                    cells.pop()
+                if cells:
+                    lines.append(" | ".join(cells))
+            if lines:
+                sheets.append(f"工作表：{sheet.title}\n" + "\n".join(lines))
+        return "\n\n".join(sheets)
+    finally:
+        workbook.close()
 
 
 def _parse_json(data: bytes) -> str:

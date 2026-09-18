@@ -142,6 +142,30 @@ test('citations retain style and remain literal inside code', () => {
   assert.equal(content.querySelector('[data-chunk-ref="8"]'), null)
 })
 
+test('personnel evidence references keep their own identifiers and do not alter code', () => {
+  const content = fragment(renderMarkdown('人员甲（Record 1），人员乙 Record 2。`Record 3`', { sourceRefs: true }))
+  assert.equal(content.querySelector('[data-record-ref="1"]')?.textContent, '证据 1')
+  assert.equal(content.querySelector('[data-record-ref="2"]')?.getAttribute('aria-label'), '查看人才证据 2')
+  assert.equal(content.querySelector('[data-chunk-ref]'), null)
+  assert.equal(content.querySelector('[data-record-ref="3"]'), null)
+})
+
+test('bare citations become readable source labels without changing code or link targets', () => {
+  const source = '- Chunk 243 明确提到算法。\n- **Chunk 290** 指出创新能力。\n\n'
+    + '共同证据：Chunk 243、Chunk 299（Chunk 215）。\n\n'
+    + '`Chunk 8` [参考](https://example.com/Chunk%20243)';
+  for (const streaming of [false, true]) {
+    const content = fragment(renderMarkdown(source, { sourceRefs: true, streaming }))
+    assert.equal(content.querySelector('[data-chunk-ref="243"]')?.textContent, '来源 243')
+    assert.equal(content.querySelector('strong [data-chunk-ref="290"]')?.textContent, '来源 290')
+    assert.equal(content.querySelectorAll('.source-inline-ref').length, 5)
+    assert.equal(content.querySelectorAll('.source-inline-refs--label').length, 4)
+    assert.equal(content.querySelector('[data-chunk-ref="215"]')?.textContent, '215')
+    assert.equal(content.querySelector('[data-chunk-ref="8"]'), null)
+    assert.equal(content.querySelector('a')?.getAttribute('href'), 'https://example.com/Chunk%20243')
+  }
+})
+
 test('every streamed prefix is sanitized against HTML, URL and forged-reference attacks', () => {
   const attacks = [
     '<script>alert(1)</script>', '<img src=x onerror=alert(1)>',

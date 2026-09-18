@@ -2188,6 +2188,22 @@ label > .app-select {
   vertical-align: baseline;
 }
 
+.source-inline-refs--label {
+  margin: 0 5px 0 1px;
+  vertical-align: baseline;
+}
+
+.source-inline-refs--label .source-inline-ref {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+  transform: none;
+}
+
 .source-inline-ref.ref-tone-0 {
   --ref-ink: #2d6f9f;
   --ref-border: #cfe3f8;

@@ -58,6 +58,8 @@ class KnowledgeChunk(BaseModel):
 class KnowledgeSearchResult(BaseModel):
     query: str
     hits: list[KnowledgeChunk]
+    talent_results: list[dict] = Field(default_factory=list)
+    talent_notice: str | None = None
 
 
 class WebSource(BaseModel):
@@ -90,12 +92,22 @@ class AskRequest(BaseModel):
     continuation: ContinuationContext | None = None
 
 
+class RowSource(BaseModel):
+    index: int
+    source_id: str
+    filename: str
+    sheet: str
+    excel_row: int
+    fields: dict[str, str]
+
+
 class AskResponse(BaseModel):
     answer: str
     provider_id: str
     model: str
     sources: list[KnowledgeChunk]
     web_sources: list[WebSource] = Field(default_factory=list)
+    row_sources: list[RowSource] = Field(default_factory=list)
 
 
 class AIActivityLog(BaseModel):

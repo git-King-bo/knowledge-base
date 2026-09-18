@@ -3,10 +3,10 @@
 Python 3.11+ / FastAPI / SQLAlchemy / SQLite。
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
-APP_PORT=8001 python run.py
+pip3 install -e .
+APP_PORT=8001 python3 run.py
 ```
 
 API 分组：

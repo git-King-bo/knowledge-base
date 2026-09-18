@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { streamKnowledge, searchKnowledge, fetchKnowledgeBaseSources } from '../lib/api'
-import type { KnowledgeBase, KnowledgeChunk, KnowledgeSource, ProviderConfig, WebSearchMode, WebSource } from '../lib/types'
+import type { KnowledgeBase, KnowledgeChunk, KnowledgeSource, ProviderConfig, RowSource, TalentResult, WebSearchMode, WebSource } from '../lib/types'
 import { renderMarkdown, safeExternalUrl, escapeHtml } from '../lib/renderMarkdown'
 import { createFrameBuffer } from '../lib/frameBuffer'
 import { useTask } from '../composables/useTask'
 import AppIcon from '../components/AppIcon.vue'
 import AppSelect from '../components/AppSelect.vue'
 import '../styles/knowledge-chat.css'
-const props = defineProps<{ mode: 'retrieval' | 'chat'; bases: KnowledgeBase[]; providers: ProviderConfig[]; initialBaseId: string }>()
+const props = defineProps<{ mode: 'retrieval' | 'chat'; bases: KnowledgeBase[]; providers: ProviderConfig[]; initialBaseId: string; baseRequest?: number }>()
 const { busy, error, run } = useTask()
 const baseId = ref(props.initialBaseId)
 const mobileSettingsOpen = ref(false)
@@ -19,12 +19,23 @@ const topK = ref(5)
 const webMode = ref<WebSearchMode>('knowledge')
 const sources = ref<KnowledgeSource[]>([])
 const hits = ref<KnowledgeChunk[]>([])
+const talentResults = ref<TalentResult[]>([])
+const talentNotice = ref('')
 const searched = ref(false)
 const elapsed = ref(0)
 const searchedQuery = ref('')
+type SearchEntry = { id: number; baseId: string; query: string; topK: number; hits: KnowledgeChunk[]; talentResults: TalentResult[]; talentNotice: string; elapsed: number }
+const searchHistory = ref<SearchEntry[]>([])
+const currentHistory = computed(() => searchHistory.value.filter(entry => entry.baseId === baseId.value))
+function restoreSearch(entry: SearchEntry) {
+  if (busy.value || entry.baseId !== baseId.value) return
+  question.value = entry.query; searchedQuery.value = entry.query; topK.value = entry.topK
+  hits.value = entry.hits; talentResults.value = entry.talentResults; elapsed.value = entry.elapsed; searched.value = true; error.value = ''
+  talentNotice.value = entry.talentNotice
+}
 type AskPayload = Parameters<typeof streamKnowledge>[0]
 type ChatTurn = { id: number; question: string; answer: string; html: string;
-  sources: KnowledgeChunk[]; webSources: WebSource[]; model: string; request: AskPayload;
+  sources: KnowledgeChunk[]; webSources: WebSource[]; rowSources: RowSource[]; model: string; request: AskPayload;
   status: 'waiting' | 'streaming' | 'done' | 'stopped' | 'error' }
 const messages = ref<ChatTurn[]>([])
 const scrollContainer = ref<HTMLElement>()
@@ -38,7 +49,7 @@ function trackScroll() {
   if (container) followOutput.value = container.scrollHeight - container.scrollTop - container.clientHeight < 80
 }
 onBeforeUnmount(() => { disposed = true; stopGeneration(); streamBuffer?.dispose() })
-const activeCitation = ref<{ messageId: number; kind: 'chunk' | 'web'; index: number }>()
+const activeCitation = ref<{ messageId: number; kind: 'chunk' | 'web' | 'record'; index: number }>()
 const citationNotice = ref<{ messageId: number; text: string }>()
 let citationTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -51,15 +62,15 @@ function clearCitation() {
 async function focusCitation(event: MouseEvent, messageId: number) {
   const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('.source-inline-ref')
   if (!button) return
-  const kind = button.dataset.webRef !== undefined ? 'web' : 'chunk'
-  const index = Number(kind === 'web' ? button.dataset.webRef : button.dataset.chunkRef)
+  const kind = button.dataset.recordRef !== undefined ? 'record' : button.dataset.webRef !== undefined ? 'web' : 'chunk'
+  const index = Number(kind === 'record' ? button.dataset.recordRef : kind === 'web' ? button.dataset.webRef : button.dataset.chunkRef)
   if (!Number.isInteger(index) || index < 0) return
   const turn = (event.currentTarget as HTMLElement).closest('.conversation-turn')
   const details = turn?.querySelector<HTMLDetailsElement>('.answer-sources')
   const target = details?.querySelector<HTMLElement>(`[data-${kind}-index="${index}"]`)
   clearCitation()
   if (!details || !target) {
-    citationNotice.value = { messageId, text: `本次回答未返回 ${kind === 'web' ? 'Web' : 'Chunk'} ${index} 的来源内容。` }
+    citationNotice.value = { messageId, text: `本次回答未返回 ${kind === 'web' ? '网页来源' : '资料来源'} ${index} 的来源内容。` }
     return
   }
   followOutput.value = false
@@ -77,9 +88,16 @@ const ready = computed(() => Boolean(baseId.value && question.value.trim() && (p
 watch(() => props.bases, () => { if (!activeBases.value.some(base => base.id === baseId.value)) baseId.value = activeBases.value[0]?.id || '' }, { immediate: true })
 watch(() => props.providers, () => { if (!providerId.value) providerId.value = props.providers.find(provider => provider.isDefault)?.id || props.providers[0]?.id || '' }, { immediate: true })
 watch(providerId, () => { model.value = props.providers.find(provider => provider.id === providerId.value)?.defaultModel || '' }, { immediate: true })
+watch(() => props.baseRequest, () => {
+  if (props.initialBaseId && props.initialBaseId !== baseId.value) {
+    stopGeneration()
+    baseId.value = props.initialBaseId
+  }
+})
 watch(baseId, async (id) => {
   clearCitation()
-  hits.value = []; searched.value = false; messages.value = []; sources.value = []
+  hits.value = []; talentResults.value = []; searched.value = false; messages.value = []; sources.value = []
+  talentNotice.value = ''
   if (!id) return
   try { const list = await fetchKnowledgeBaseSources(id); if (baseId.value === id) sources.value = list }
   catch (cause) { if (baseId.value === id) error.value = cause instanceof Error ? cause.message : '读取来源失败' }
@@ -119,11 +137,11 @@ async function generateTurn(turn: ChatTurn, continuing = false) {
       streamBuffer = buffer
       try {
         await streamKnowledge({ ...turn.request,
-          continuation: continuing && (turn.sources.length || turn.webSources.length)
+          continuation: continuing && previousAnswer
             ? { answer: previousAnswer, sources: turn.sources, webSources: turn.webSources } : undefined,
         }, {
           signal: controller.signal,
-          onMeta(meta) { turn.request.providerId = meta.providerId; turn.request.model = meta.model; Object.assign(turn, { sources: meta.sources, webSources: meta.webSources, model: meta.model }) },
+          onMeta(meta) { turn.request.providerId = meta.providerId; turn.request.model = meta.model; Object.assign(turn, { sources: meta.sources, webSources: meta.webSources, rowSources: meta.rowSources || [], model: meta.model }) },
           onDelta(text) { buffer.append(text) },
         })
         turn.status = 'done'
@@ -145,12 +163,21 @@ function submit() {
     const value = question.value.trim()
     const started = performance.now()
     if (props.mode === 'retrieval') {
-      searched.value = false; hits.value = []
-      const result = await searchKnowledge(value, topK.value, baseId.value)
+      const searchedBase = baseId.value
+      const requestedTopK = topK.value
+      searched.value = false; hits.value = []; talentResults.value = []
+      talentNotice.value = ''
+      const result = await searchKnowledge(value, requestedTopK, searchedBase)
+      const entry = { id: Date.now(), baseId: searchedBase, query: value, topK: requestedTopK,
+        hits: result.hits, talentResults: result.talentResults || [], talentNotice: result.talentNotice || '', elapsed: Math.round(performance.now() - started) }
+      searchHistory.value = [entry, ...searchHistory.value.filter(item => !(item.baseId === searchedBase && item.query === value && item.topK === requestedTopK))].slice(0, 20)
+      if (baseId.value !== searchedBase) return
       hits.value = result.hits; searched.value = true; searchedQuery.value = value
+      talentResults.value = result.talentResults || []
+      talentNotice.value = result.talentNotice || ''
     } else {
       const turn = reactive<ChatTurn>({ id: Date.now(), question: value, answer: '', html: '',
-        sources: [], webSources: [], model: model.value, status: 'waiting',
+        sources: [], webSources: [], rowSources: [], model: model.value, status: 'waiting',
         request: { question: value, knowledgeBaseId: baseId.value, providerId: providerId.value,
           model: model.value || undefined, topK: topK.value, webSearchMode: webMode.value } })
       messages.value.push(turn)
@@ -176,8 +203,8 @@ function submit() {
 <label>召回数量 <span class="range-value">Top {{ topK }}</span>
 <input v-model.number="topK" type="range" min="1" max="12" :disabled="busy" />
 <span class="range-labels">
-<span>1 段</span>
-<span>12 段</span>
+<span>1 条</span>
+<span>12 条</span>
 </span>
 </label>
 
@@ -186,6 +213,13 @@ function submit() {
 <strong>从召回到可信答案</strong>
 <p>先检查相关切片，再验证答案引用。资料内容更新后，可重新导入并重建索引。</p>
 </div>
+<section v-if="currentHistory.length" class="search-history" aria-label="最近搜索">
+  <header><h3>最近搜索</h3><button class="text-button" :disabled="busy" @click="searchHistory = searchHistory.filter(entry => entry.baseId !== baseId)">清空历史</button></header>
+  <p>本次打开期间保留最近 20 次搜索，点击回看当时结果。</p>
+  <button v-for="entry in currentHistory" :key="entry.id" class="search-history-entry" :disabled="busy" @click="restoreSearch(entry)">
+    <span>{{ entry.query }}</span><small>{{ entry.hits.length }} 条结果 · Top {{ entry.topK }}</small>
+  </button>
+</section>
 </div>
 </aside>
     <aside v-else class="panel qa-settings" :class="{ 'is-expanded': mobileSettingsOpen }" aria-label="问答设置">
@@ -212,7 +246,8 @@ function submit() {
         </section>
         <section class="qa-setting-group">
           <h3><AppIcon name="search" :size="16" />检索配置<span>03</span></h3>
-          <label class="qa-range-field"><span>召回数量<output>Top {{ topK }}</output></span><input v-model.number="topK" type="range" min="1" max="12" :disabled="busy" /><span class="range-labels"><span>1 段</span><span>12 段</span></span></label>
+          <label class="qa-range-field"><span>召回数量<output>Top {{ topK }}</output></span><input v-model.number="topK" type="range" min="1" max="12" :disabled="busy" /><span class="range-labels"><span>1 条</span><span>12 条</span></span></label>
+          <p class="qa-field-note">人才查询最多展示 {{ topK }} 条人员记录；匹配总数按全表统计。</p>
           <label>资料范围<AppSelect v-model="webMode" label="资料范围" :disabled="busy" :options="[{ value: 'knowledge', label: '仅知识库' }, { value: 'auto', label: '按需补充联网搜索' }, { value: 'web', label: '知识库 + 联网搜索' }]" /></label>
           <p v-if="webMode !== 'knowledge'" class="qa-field-note">联网搜索需配置搜索服务；未返回网页时仅使用知识库资料。</p>
         </section>
@@ -235,14 +270,27 @@ function submit() {
 </h3>
 <span class="muted">{{ searched ? `${elapsed} ms · Top ${topK}` : '等待测试' }}</span>
 </div>
-<div v-if="!hits.length" class="empty-state">
+<p v-if="talentNotice" class="notice" role="status">{{ talentNotice }}</p>
+<section v-for="(result, resultIndex) in talentResults" :key="`${result.source_id}-${result.sheet}-${resultIndex}`" class="panel-body talent-results">
+  <h3>人才查询 · {{ result.file }} / {{ result.sheet }}</h3>
+  <p v-if="result.error" class="notice error">{{ result.error }}</p>
+  <template v-else>
+    <p class="muted">扫描 {{ result.scanned_records }} 条人员记录，匹配 {{ result.matched_records }} 条<span v-if="result.plan.sort_by"> · 按 {{ result.plan.sort_by }} {{ result.plan.descending ? '降序' : '升序' }}</span></p>
+    <p v-if="result.missing_sort_values" class="muted">{{ result.missing_sort_values }} 条记录的排序指标缺失或不是有效数值，未参与排名。</p>
+    <div v-if="result.records.length" class="table-wrap"><table><thead><tr><th>姓名</th><th>机构</th><th>领域</th><th v-if="result.plan.sort_by">{{ result.plan.sort_by }}</th><th>原表行号</th></tr></thead>
+      <tbody><tr v-for="record in result.records" :key="record.excel_row"><td>{{ record.fields['姓名'] || record.fields['人员姓名'] || record.fields['员工姓名'] || record.fields['name'] || record.fields['full name'] }}</td><td>{{ record.fields['当前机构'] || '—' }}</td><td>{{ record.fields['领域'] || '—' }}</td><td v-if="result.plan.sort_by">{{ record.fields[result.plan.sort_by] }}</td><td>{{ record.excel_row }}</td></tr></tbody></table></div>
+    <p v-else class="muted">当前条件下没有可展示的人员记录。</p>
+    <p v-if="result.truncated" class="muted">本文件展示 {{ result.returned_records }} 条；本次人才结果合计不超过召回数量 Top {{ topK }}。可调整召回数量查看更多。</p>
+  </template>
+</section>
+<div v-if="!hits.length && !talentResults.length" class="empty-state">
 <span class="empty-icon">
 <AppIcon name="search" :size="28" />
 </span>
 <h3>{{ searched ? '没有召回相关内容' : '看看知识库如何理解你的问题' }}</h3>
 <p>{{ searched ? '尝试调整问题表述，或检查知识库是否已导入相关资料。' : '输入一个真实问题，查看命中的片段与相关度。' }}</p>
 </div>
-<div v-else class="panel-body">
+<div v-if="hits.length" class="panel-body">
 <p class="muted">测试问题：{{ searchedQuery }}</p>
 <article v-for="(hit, index) in hits" :key="hit.id" class="chunk-card">
 <div>
@@ -251,7 +299,7 @@ function submit() {
 <span class="score">相关度 {{ (hit.score ?? 0).toFixed(3) }}</span>
 </div>
 <p>{{ hit.content }}</p>
-<small class="muted">Chunk {{ hit.chunkIndex }} · {{ hit.tokenCount }} 词元（本地估算）</small>
+<small class="muted">片段 {{ hit.chunkIndex }} · {{ hit.tokenCount }} 词元（本地估算）</small>
 </article>
 </div>
 </section>
@@ -288,19 +336,29 @@ function submit() {
 <button v-if="message.status === 'stopped' || message.status === 'error'" type="button" class="qa-stop-button" :disabled="busy" @click="continueGeneration(message)"><span aria-hidden="true">▶</span>继续生成</button>
 <p v-if="citationNotice?.messageId === message.id" class="citation-notice" role="status">{{ citationNotice.text }}</p>
 <details class="answer-sources">
-<summary>参考来源 · {{ message.sources.length + message.webSources.length }} 处</summary>
+<summary>参考来源 · {{ message.sources.length + message.webSources.length + (message.rowSources?.length || 0) }} 处</summary>
+<article v-for="source in message.rowSources" :key="`record-${source.index}`" class="chunk-card citation-source"
+  :class="{ 'is-citation-active': activeCitation?.messageId === message.id && activeCitation.kind === 'record' && activeCitation.index === source.index }"
+  :data-record-index="source.index" :aria-label="`人才证据 ${source.index}，${source.filename}，${source.sheet}，第${source.excel_row}行`" tabindex="-1">
+  <div><span class="badge purple">人才证据 {{ source.index }}</span><strong>{{ source.filename }}</strong></div>
+  <p class="muted">工作表 {{ source.sheet }} · Excel 第 {{ source.excel_row }} 行 · 上传文件中的原始记录</p>
+  <dl class="record-evidence-fields"><template v-for="(value, field) in source.fields" :key="field">
+    <dt>{{ field }}</dt><dd><a v-if="safeExternalUrl(value)" :href="safeExternalUrl(value)" target="_blank" rel="noopener noreferrer">{{ value }}</a><span v-else>{{ value || '未填写' }}</span></dd>
+  </template></dl>
+  <small class="muted">网页链接为原表记录，未实时核验网页内容。</small>
+</article>
 <article
   v-for="source in message.sources"
   :key="source.id"
   class="chunk-card citation-source"
   :class="{ 'is-citation-active': activeCitation?.messageId === message.id && activeCitation.kind === 'chunk' && activeCitation.index === source.chunkIndex }"
   :data-chunk-index="source.chunkIndex"
-  :aria-label="`${sourceName(source.sourceId)}，Chunk ${source.chunkIndex}`"
+  :aria-label="`${sourceName(source.sourceId)}，来源 ${source.chunkIndex}`"
   tabindex="-1"
 >
 <div>
 <strong>{{ sourceName(source.sourceId) }}</strong>
-<span class="badge">Chunk {{ source.chunkIndex }}</span>
+<span class="badge">来源 {{ source.chunkIndex }}</span>
 </div>
 <p>{{ source.content }}</p>
 </article>
@@ -310,10 +368,10 @@ function submit() {
   class="chunk-card citation-source"
   :class="{ 'is-citation-active': activeCitation?.messageId === message.id && activeCitation.kind === 'web' && activeCitation.index === source.index }"
   :data-web-index="source.index"
-  :aria-label="`Web ${source.index}，${source.title}`"
+  :aria-label="`网页 ${source.index}，${source.title}`"
   tabindex="-1"
 >
-<a :href="safeExternalUrl(source.url)" target="_blank" rel="noopener noreferrer">Web {{ source.index }} · {{ source.title }}</a>
+<a :href="safeExternalUrl(source.url)" target="_blank" rel="noopener noreferrer">网页 {{ source.index }} · {{ source.title }}</a>
 <p>{{ source.snippet }}</p>
 </article>
 </details>
@@ -337,3 +395,16 @@ function submit() {
 </section>
   </div>
 </template>
+
+<style scoped>
+.record-evidence-fields { display: grid; grid-template-columns: minmax(90px, 150px) minmax(0, 1fr); gap: 8px 14px; margin: 14px 0; font-size: 12px; line-height: 1.8; }
+.record-evidence-fields dt { color: #93809f; }
+.record-evidence-fields dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.search-history { margin-top: 22px; padding-top: 18px; border-top: 1px solid #eee8f4; }
+.search-history header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.search-history h3 { font-size: 12px; color: #766486; }
+.search-history > p { margin: 8px 0 12px; font-size: 11px; color: #998ba4; line-height: 1.7; }
+.search-history-entry { display: flex; flex-direction: column; align-items: flex-start; width: 100%; margin-top: 7px; padding: 10px 12px; border-color: #eee8f4; background: #fcfafe; text-align: left; }
+.search-history-entry span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #705d82; font-size: 12px; }
+.search-history-entry small { font-size: 10px; color: #a392b1; }
+</style>

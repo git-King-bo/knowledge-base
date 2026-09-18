@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { fetchKnowledgeBases, fetchProviders } from './lib/api'
 import type { KnowledgeBase, ProviderConfig } from './lib/types'
 import AppIcon from './components/AppIcon.vue'
@@ -16,7 +16,8 @@ const tabs = [
   { id: 'settings', label: '模型配置', icon: 'settings', description: '统一管理模型服务，连接你的 AI 能力。' },
 ]
 const activeTab = ref('knowledge')
-const selectedBaseId = ref('')
+const selectedBaseIds = reactive<Record<string, string>>({ retrieval: '', chat: '' })
+const baseRequests = reactive<Record<string, number>>({ retrieval: 0, chat: 0 })
 const bases = ref<KnowledgeBase[]>([])
 const providers = ref<ProviderConfig[]>([])
 const connected = ref(false)
@@ -34,7 +35,10 @@ async function load() {
 async function refreshBases() { bases.value = await fetchKnowledgeBases() }
 async function refreshProviders() { providers.value = await fetchProviders() }
 function navigate(id: string, baseId?: string) {
-  if (baseId !== undefined) selectedBaseId.value = baseId
+  if (baseId !== undefined) {
+    selectedBaseIds[id] = baseId
+    baseRequests[id] = (baseRequests[id] || 0) + 1
+  }
   activeTab.value = id
   window.location.hash = id
 }
@@ -105,9 +109,11 @@ onUnmounted(() => window.removeEventListener('hashchange', readHash))
 <span class="page-index">{{ String(tabs.findIndex(tab => tab.id === activeTab) + 1).padStart(2, '0') }} / 05</span>
 </div>
         <KnowledgeWorkspace v-if="activeTab === 'knowledge'" :bases="bases" :loading="busy" :refresh="refreshBases" @navigate="navigate" />
-        <RetrievalWorkspace v-else-if="activeTab === 'retrieval' || activeTab === 'chat'" :key="activeTab" :mode="activeTab" :bases="bases" :providers="providers" :initial-base-id="selectedBaseId" />
-        <UsageDashboard v-else-if="activeTab === 'usage'" :providers="providers" :bases="bases" />
-        <ProviderSettings v-else :providers="providers" :refresh="refreshProviders" />
+        <KeepAlive :max="2">
+          <RetrievalWorkspace v-if="activeTab === 'retrieval' || activeTab === 'chat'" :key="activeTab" :mode="activeTab" :bases="bases" :providers="providers" :initial-base-id="selectedBaseIds[activeTab] || ''" :base-request="baseRequests[activeTab] || 0" />
+        </KeepAlive>
+        <UsageDashboard v-if="activeTab === 'usage'" :providers="providers" :bases="bases" />
+        <ProviderSettings v-if="activeTab === 'settings'" :providers="providers" :refresh="refreshProviders" />
       </main>
     </div>
   </div>

@@ -62,18 +62,21 @@ function createRenderer(highlight: boolean) {
     html({ text }) { return escapeHtml(text) },
     text(token) {
       const html = Renderer.prototype.text.call(this, token) as string
-      if (!references) return html
-      return html.replace(/[\(（\[]\s*((?:(?:Chunk|Source|Web)\s+\d+\s*(?:[,，]\s*)?)+)\s*[\)）\]]/gi, (_, refs: string) => {
-        const buttons = [...refs.matchAll(/(Chunk|Source|Web)\s+(\d+)/gi)].map(match => {
-          const kind = match[1]!.toLowerCase() === 'web' ? 'web' : 'chunk'
+      if (!references || ('tokens' in token && token.tokens)) return html
+      return html.replace(/[\(（\[]\s*((?:(?:Chunk|Source|Web|Record)\s+\d+\s*(?:[,，]\s*)?)+)\s*[\)）\]]|\b(?:Chunk|Source|Web|Record)\s+\d+(?![\dA-Za-z_])/gi, (full: string, grouped: string | undefined) => {
+        const refs = grouped || full
+        const inline = !grouped
+        const buttons = [...refs.matchAll(/(Chunk|Source|Web|Record)\s+(\d+)/gi)].map(match => {
+          const kind = match[1]!.toLowerCase() === 'record' ? 'record' : match[1]!.toLowerCase() === 'web' ? 'web' : 'chunk'
           const number = Number(match[2])
           if (!Number.isSafeInteger(number)) return ''
           const key = `${kind}:${number}`
           if (!tones.has(key)) tones.set(key, tones.size % 12)
-          const title = `${kind === 'web' ? 'Web' : 'Chunk'} ${number}`
-          return `<button class="source-inline-ref ${kind === 'web' ? 'web-ref' : ''} ref-tone-${tones.get(key)}" type="button" data-${kind}-ref="${number}" title="${title}" aria-label="${title}">${kind === 'web' ? 'W' : ''}${number}</button>`
+          const title = `查看${kind === 'record' ? '人才证据' : kind === 'web' ? '网页来源' : '资料来源'} ${number}`
+          const label = inline ? `${kind === 'record' ? '证据' : kind === 'web' ? '网页' : '来源'} ${number}` : `${kind === 'record' ? '证据 ' : kind === 'web' ? 'W' : ''}${number}`
+          return `<button class="source-inline-ref ${kind === 'web' ? 'web-ref' : ''} ref-tone-${tones.get(key)}" type="button" data-${kind}-ref="${number}" title="${title}" aria-label="${title}">${label}</button>`
         }).join('')
-        return `<span class="source-inline-refs" aria-label="引用来源">${buttons}</span>`
+        return `<span class="source-inline-refs${inline ? ' source-inline-refs--label' : ''}" aria-label="引用来源">${buttons}</span>`
       })
     },
     link({ href, title, tokens }) {
@@ -114,10 +117,10 @@ export function renderMarkdown(source: string, options: RenderMarkdownOptions = 
       'em', 'i', 'del', 's', 'blockquote', 'ul', 'ol', 'li', 'pre', 'code', 'table',
       'thead', 'tbody', 'tr', 'th', 'td', 'a', 'span', 'button', 'input'],
     ALLOWED_ATTR: ['class', 'href', 'title', 'target', 'rel', 'type', 'disabled', 'checked',
-      'start', 'align', 'aria-label', 'data-chunk-ref', 'data-web-ref'],
+      'start', 'align', 'aria-label', 'data-chunk-ref', 'data-web-ref', 'data-record-ref'],
     ALLOW_DATA_ATTR: false,
     ALLOW_ARIA_ATTR: false,
-    ADD_URI_SAFE_ATTR: ['data-chunk-ref', 'data-web-ref', 'aria-label', 'target', 'rel'],
+    ADD_URI_SAFE_ATTR: ['data-chunk-ref', 'data-web-ref', 'data-record-ref', 'aria-label', 'target', 'rel'],
     ALLOWED_URI_REGEXP: /^https?:\/\//i,
     SANITIZE_NAMED_PROPS: true,
   })

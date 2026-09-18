@@ -55,6 +55,31 @@ export interface KnowledgeChunk {
 export interface KnowledgeSearchResult {
   query: string
   hits: KnowledgeChunk[]
+  talentResults?: TalentResult[]
+  talentNotice?: string | null
+}
+
+export interface TalentResult {
+  source_id?: string
+  file: string
+  sheet: string
+  error?: string
+  scanned_records: number
+  matched_records: number
+  missing_sort_values: number
+  returned_records: number
+  truncated: boolean
+  plan: { sort_by: string | null; descending: boolean; filters: { field: string; op: string; value: string }[] }
+  records: { excel_row: number; fields: Record<string, string> }[]
+}
+
+export interface RowSource {
+  index: number
+  source_id: string
+  filename: string
+  sheet: string
+  excel_row: number
+  fields: Record<string, string>
 }
 
 export interface WebSource {

@@ -576,6 +576,20 @@ class KnowledgeIngestionRepository:
         self.db.refresh(source)
         return _source_to_schema(source)
 
+    def list_active_spreadsheet_sources(
+        self, knowledge_base_id: str | None = None,
+    ) -> list[KnowledgeSourceModel]:
+        active_sources = select(KnowledgeBaseSourceModel.source_id).join(
+            KnowledgeBaseModel, KnowledgeBaseModel.id == KnowledgeBaseSourceModel.knowledge_base_id
+        ).where(KnowledgeBaseModel.status == "active")
+        if knowledge_base_id:
+            active_sources = active_sources.where(KnowledgeBaseModel.id == knowledge_base_id)
+        return list(self.db.scalars(select(KnowledgeSourceModel).where(
+            KnowledgeSourceModel.id.in_(active_sources),
+            KnowledgeSourceModel.status == "parsed",
+            KnowledgeSourceModel.filename.ilike("%.xlsx"),
+        ).order_by(KnowledgeSourceModel.created_at, KnowledgeSourceModel.id)).all())
+
     def search_chunks(
         self,
         query: str,

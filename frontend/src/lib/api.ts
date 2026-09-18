@@ -5,6 +5,7 @@ import type {
   KnowledgeChunk,
   KnowledgeSearchResult,
   KnowledgeSource,
+  RowSource,
   ProviderTestResult,
   ProviderConfig,
   ProviderModel,
@@ -422,12 +423,14 @@ export async function rebuildKnowledgeSourceEmbeddings(sourceId: string, knowled
 export async function searchKnowledge(query: string, topK = 5, knowledgeBaseId?: string) {
   const params = new URLSearchParams({ q: query, top_k: String(topK) })
   if (knowledgeBaseId) params.set('knowledge_base_id', knowledgeBaseId)
-  const data = await request<KnowledgeSearchResult & { hits: ApiKnowledgeChunk[] }>(
+  const data = await request<KnowledgeSearchResult & { hits: ApiKnowledgeChunk[]; talent_results?: import('./types').TalentResult[]; talent_notice?: string | null }>(
     `/knowledge/search?${params.toString()}`,
   )
   return {
     query: data.query,
     hits: data.hits.map(toKnowledgeChunk),
+    talentResults: data.talent_results || [],
+    talentNotice: data.talent_notice,
   }
 }
 
@@ -445,6 +448,7 @@ export async function askKnowledge(payload: {
     model: string
     sources: ApiKnowledgeChunk[]
     web_sources: ApiWebSource[]
+    row_sources?: RowSource[]
   }>('/knowledge/ask', {
     method: 'POST',
     body: JSON.stringify({
@@ -462,6 +466,7 @@ export async function askKnowledge(payload: {
     model: data.model,
     sources: data.sources.map(toKnowledgeChunk),
     webSources: data.web_sources.map(toWebSource),
+    rowSources: data.row_sources || [],
   }
 }
 
@@ -483,6 +488,7 @@ export interface KnowledgeStreamMeta {
   model: string
   sources: KnowledgeChunk[]
   webSources: WebSource[]
+  rowSources?: RowSource[]
 }
 
 export async function streamKnowledge(
@@ -524,9 +530,11 @@ export async function streamKnowledge(
     if (!value || typeof value !== 'object') throw new Error('流式响应格式错误')
     if (event.event === 'meta') {
       if (hasMeta || typeof value.provider_id !== 'string' || typeof value.model !== 'string'
-        || !Array.isArray(value.sources) || !Array.isArray(value.web_sources)) throw new Error('来源信息格式错误')
+        || !Array.isArray(value.sources) || !Array.isArray(value.web_sources)
+        || (value.row_sources !== undefined && !Array.isArray(value.row_sources))) throw new Error('来源信息格式错误')
       hasMeta = true
       options.onMeta({ providerId: value.provider_id, model: value.model,
+        ...(value.row_sources ? { rowSources: value.row_sources as RowSource[] } : {}),
         sources: value.sources.map(toKnowledgeChunk), webSources: value.web_sources.map(toWebSource) })
     } else if (event.event === 'delta') {
       if (!hasMeta || typeof value.text !== 'string') throw new Error('流式文本格式错误')

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import httpx
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 from sqlalchemy import create_engine, inspect, text
 from alembic import command
 from alembic.config import Config
@@ -120,6 +121,51 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(result['summary']['total_tokens'], 0)
         self.assertEqual({item['source'] for item in result['records']}, {'unknown', 'mock'})
         self.assertTrue(all(item['total_tokens'] is None for item in result['records']))
+
+    def test_xlsx_upload_indexes_all_nonempty_sheets(self):
+        base = self.base()
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = '产品清单'
+        sheet.append(['产品名称', '备注', '库存', '启用', '日期'])
+        sheet.append(['星河设备', None, 0, False, datetime(2026, 9, 17)])
+        workbook.create_sheet('空工作表')
+        second = workbook.create_sheet('操作流程')
+        second.append(['设备校准流程', '先检查电源再启动'])
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+        response = self.client.post(f'/api/knowledge/bases/{base}/upload',
+            files={'file': ('设备.XLSX', output.getvalue(), 'application/octet-stream')})
+        self.assertEqual(response.status_code, 201, response.text)
+        source = response.json()['source']
+        self.assertEqual(source['mime_type'],
+                         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertGreater(source['chunk_count'], 0)
+        for query in ('星河设备', '设备校准流程'):
+            hits = self.client.get('/api/knowledge/search',
+                params={'q': query, 'knowledge_base_id': base}).json()['hits']
+            self.assertTrue(hits, query)
+        from app.services.ingestion import parse_uploaded_file
+        parsed = parse_uploaded_file('设备.xlsx', output.getvalue()).text
+        self.assertIn('工作表：产品清单', parsed)
+        self.assertIn('工作表：操作流程', parsed)
+        self.assertIn('星河设备 | | 0 | False | 2026-09-17', parsed)
+        self.assertNotIn('空工作表', parsed)
+
+    def test_empty_and_corrupt_xlsx_uploads_fail_cleanly(self):
+        base = self.base()
+        workbook = Workbook()
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+        for content in (output.getvalue(), b'not an Excel workbook'):
+            response = self.client.post(f'/api/knowledge/bases/{base}/upload',
+                files={'file': ('empty.xlsx', content, 'application/octet-stream')})
+            self.assertEqual(response.status_code, 400, response.text)
+        sources = self.client.get(f'/api/knowledge/bases/{base}/sources').json()
+        self.assertEqual(len(sources), 2)
+        self.assertTrue(all(source['status'] == 'failed' for source in sources))
 
     def test_summary_is_not_limited_to_current_page_and_csv_matches(self):
         repo = AIRepository(self.db)

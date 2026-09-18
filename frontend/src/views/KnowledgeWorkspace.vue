@@ -7,6 +7,7 @@ import AppIcon from '../components/AppIcon.vue'
 import AppSelect from '../components/AppSelect.vue'
 import AppDialog from '../components/AppDialog.vue'
 import MacDialog from '../components/MacDialog.vue'
+import FilePreview from '../components/FilePreview.vue'
 const props = defineProps<{ bases: KnowledgeBase[]; loading: boolean; refresh: () => Promise<void> }>()
 const emit = defineEmits<{ navigate: [tab: string, baseId: string] }>()
 const { busy, error, run } = useTask()
@@ -26,6 +27,7 @@ const formVisible = computed({
   set: (visible: boolean) => { dialog.value = visible ? formMode.value : '' },
 })
 const removingSource = ref<KnowledgeSource>()
+const previewingSource = ref<KnowledgeSource>()
 const form = reactive({ name: '', description: '', tags: '' })
 const notice = ref('')
 const uploadProgress = ref('')
@@ -211,12 +213,12 @@ function rebuild(source: KnowledgeSource) {
 </section>
     <div v-if="selected.status === 'archived'" class="notice">此知识库已归档。恢复使用后可继续导入、检索与问答。</div>
     <label v-else class="upload-zone" :class="{ disabled: busy }">
-<input type="file" multiple accept=".txt,.md,.markdown,.pdf,.docx,.csv,.json" :disabled="busy" @change="upload" />
+<input type="file" multiple accept=".txt,.md,.markdown,.pdf,.docx,.xlsx,.csv,.json" :disabled="busy" @change="upload" />
 <span class="empty-icon">
 <AppIcon name="upload" :size="25" />
 </span>
 <strong>{{ uploadProgress || '点击选择资料，自动解析并建立索引' }}</strong>
-<span>支持 TXT、Markdown、PDF、DOCX、CSV、JSON · 单个文件不超过 20 MB</span>
+<span>支持 TXT、Markdown、PDF、DOCX、XLSX、CSV、JSON · 单个文件不超过 20 MB</span>
 </label>
     <section class="panel">
 <div class="panel-header">
@@ -258,7 +260,8 @@ function rebuild(source: KnowledgeSource) {
 <td>{{ date(source.createdAt) }}</td>
 <td>
 <div class="row-actions">
-<button class="text-button" :disabled="busy || !source.chunkCount" @click="sourceFilter = source.id; detailTab = 'chunks'">查看</button>
+<button class="text-button" @click="previewingSource = source">预览</button>
+<button class="text-button" :disabled="busy || !source.chunkCount" @click="sourceFilter = source.id; detailTab = 'chunks'">片段</button>
 <button class="text-button" :disabled="busy || !source.chunkCount" @click="rebuild(source)">重建索引</button>
 <button class="text-button danger-text" :disabled="busy" @click="removingSource = source; dialog = 'remove'">移除</button>
 </div>
@@ -274,7 +277,7 @@ function rebuild(source: KnowledgeSource) {
 <div v-if="!displayedChunks.length" class="empty-state">暂无切片</div>
 <article v-for="chunk in displayedChunks" :key="chunk.id" class="chunk-card">
 <div>
-<span class="badge">Chunk {{ chunk.chunkIndex }}</span>
+<span class="badge">片段 {{ chunk.chunkIndex }}</span>
 <span class="muted">{{ sources.find(source => source.id === chunk.sourceId)?.filename }} · {{ chunk.tokenCount }} 词元（本地估算）</span>
 </div>
 <p>{{ chunk.content }}</p>
@@ -297,6 +300,7 @@ function rebuild(source: KnowledgeSource) {
 </footer>
 </form>
   </MacDialog>
+  <FilePreview v-if="previewingSource" :key="previewingSource.id" :base-id="selectedId" :source="previewingSource" @close="previewingSource = undefined" />
   <AppDialog v-if="dialog === 'delete' || dialog === 'remove'" :title="dialog === 'delete' ? '删除知识库' : '移除资料'" @close="!busy && (dialog = '')">
     <div v-if="error" class="notice error" role="alert">{{ error }}</div>
 <p class="dialog-description">{{ dialog === 'delete' ? `确认删除「${selected?.name}」？此操作会删除知识库及其资料关联。` : `确认从此知识库移除「${removingSource?.filename}」？` }}</p>
