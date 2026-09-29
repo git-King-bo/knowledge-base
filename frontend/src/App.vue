@@ -1,21 +1,37 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { fetchKnowledgeBases, fetchProviders } from './lib/api'
 import type { KnowledgeBase, ProviderConfig } from './lib/types'
 import AppIcon from './components/AppIcon.vue'
+import FairyIcon from './components/FairyIcon.vue'
+import MagicEntrance from './components/MagicEntrance.vue'
 import KnowledgeWorkspace from './views/KnowledgeWorkspace.vue'
 import RetrievalWorkspace from './views/RetrievalWorkspace.vue'
 import UsageDashboard from './views/UsageDashboard.vue'
 import ProviderSettings from './views/ProviderSettings.vue'
 import { useTask } from './composables/useTask'
+import { currentUser, restoreLogin, logout } from './lib/auth'
+import LoginPanel from './components/LoginPanel.vue'
+import TalentWorkspace from './views/TalentWorkspace.vue'
+import JobsWorkspace from './views/JobsWorkspace.vue'
+import TeamWorkspace from './views/TeamWorkspace.vue'
+const sessionReady = ref(false)
+const loginTransition = ref(false)
+const arrivedFromLogin = ref(false)
+function beginLoginEntrance() { loginTransition.value = true; arrivedFromLogin.value = true }
 const tabs = [
   { id: 'knowledge', label: '知识库', icon: 'book', description: '连接团队知识，让每一份资料都产生价值。' },
   { id: 'retrieval', label: '检索测试', icon: 'search', description: '验证召回结果，让回答有据可依。' },
   { id: 'chat', label: '知识问答', icon: 'chat', description: '基于知识库提问，沿着来源探索答案。' },
   { id: 'usage', label: 'Token 监控', icon: 'chart', description: '看清每一次模型调用，掌握每一份 Token 消耗。' },
+  { id: 'talents', label: '人才管理', icon: 'book', description: '查看完整人才信息、筛选并维护资料。' },
+  // { id: 'jobs', label: '后台任务', icon: 'chart', description: '查看导入和索引的进度，重试失败任务。' },
+  // { id: 'team', label: '账号与管理', icon: 'settings', description: '账号、知识库权限和回收站。' },
   { id: 'settings', label: '模型配置', icon: 'settings', description: '统一管理模型服务，连接你的 AI 能力。' },
 ]
 const activeTab = ref('knowledge')
+const entrance = ref<InstanceType<typeof MagicEntrance>>()
+const entrancePhase = ref<'idle' | 'playing' | 'revealing'>('idle')
 const selectedBaseIds = reactive<Record<string, string>>({ retrieval: '', chat: '' })
 const baseRequests = reactive<Record<string, number>>({ retrieval: 0, chat: 0 })
 const bases = ref<KnowledgeBase[]>([])
@@ -46,39 +62,42 @@ function readHash() {
   const id = window.location.hash.slice(1)
   activeTab.value = tabs.some(tab => tab.id === id) ? id : 'knowledge'
 }
-onMounted(() => { readHash(); window.addEventListener('hashchange', readHash); void load() })
+onMounted(async () => { readHash(); window.addEventListener('hashchange', readHash); await restoreLogin(); sessionReady.value = true })
+watch(currentUser, user => { if (user) void load(); else { bases.value=[]; providers.value=[] } })
 onUnmounted(() => window.removeEventListener('hashchange', readHash))
 </script>
 <template>
-  <div class="app-shell">
+  <p v-if="!sessionReady" class="notice">正在检查登录状态…</p>
+  <LoginPanel v-if="sessionReady && (!currentUser || loginTransition)" @entering="beginLoginEntrance" @entered="loginTransition = false" />
+  <template v-if="sessionReady && currentUser">
+  <MagicEntrance :autoplay="!arrivedFromLogin" ref="entrance" @phase="entrancePhase = $event" />
+  <div class="app-shell" :class="`entrance-${entrancePhase}`" :inert="loginTransition || entrancePhase !== 'idle' || undefined" :aria-hidden="loginTransition || entrancePhase !== 'idle' || undefined">
     <aside class="sidebar">
       <a class="brand" href="#knowledge">
-<span class="brand-mark">
-<AppIcon name="layers" :size="24" />
-</span>
-<span>知序<span class="brand-en">KNOWLEDGE OS</span>
+<FairyIcon name="spark" :size="48" portrait />
+<span>知序<span class="brand-en">A LITTLE KNOWLEDGE MAGIC</span>
 </span>
 </a>
       <div class="workspace-switch">
-<span class="workspace-avatar">K</span>
+<span class="workspace-avatar"><AppIcon name="globe" :size="18" /></span>
 <div>知识工作空间<small>个人工作空间</small>
 </div>
-<span class="muted">⌄</span>
+<span class="workspace-online" title="个人工作空间">●</span>
 </div>
       <span class="nav-caption">工作空间</span>
       <nav aria-label="主导航">
-<a v-for="tab in tabs.slice(0, 4)" :key="tab.id" :href="`#${tab.id}`" :class="{ active: activeTab === tab.id }" :aria-current="activeTab === tab.id ? 'page' : undefined">
-<AppIcon :name="tab.icon" />{{ tab.label }}<span v-if="tab.id === 'knowledge'" class="nav-count">{{ bases.length }}</span>
+<a v-for="tab in tabs.filter(t => !['settings', 'team'].includes(t.id) && (currentUser?.role === 'admin' || t.id !== 'usage'))" :key="tab.id" :href="`#${tab.id}`" :class="{ active: activeTab === tab.id }" :aria-current="activeTab === tab.id ? 'page' : undefined">
+<FairyIcon :name="tab.icon" :size="34" :portrait="tab.id === 'chat'" /><span class="nav-label">{{ tab.label }}</span><span v-if="tab.id === 'knowledge'" class="nav-count">{{ bases.length }}</span>
 </a>
 </nav>
       <span class="nav-caption">管理</span>
       <nav>
-<a href="#settings" :class="{ active: activeTab === 'settings' }">
-<AppIcon name="settings" />模型配置</a>
+<a v-if="currentUser?.role === 'admin'" href="#settings" :class="{ active: activeTab === 'settings' }" :aria-current="activeTab === 'settings' ? 'page' : undefined">
+<FairyIcon name="settings" :size="34" /><span class="nav-label">模型配置</span></a>
+<!-- <a href="#team" :class="{active:activeTab==='team'}"><FairyIcon name="settings" :size="34"/><span>账号与管理</span></a> -->
 </nav>
       <div class="sidebar-bottom">
-<div class="small-label">知识的价值，在于被使用</div>
-<p>从资料到答案，连接每一步。</p>
+<a class="fairy-companion" href="#chat"><img src="/mascot/knowledge-fairy.webp" alt="" width="616" height="640" /><span class="small-label">灵感，正在发芽</span><span>和知识精灵聊一聊 <AppIcon name="arrow" :size="13" /></span></a>
 <div class="connection">
 <span class="status-dot" :class="{ offline: !connected }">
 </span>{{ connected ? '服务已连接' : busy ? '正在连接服务' : '服务未连接' }}<button class="icon-button" aria-label="重新连接服务" :disabled="busy" @click="load">
@@ -93,28 +112,33 @@ onUnmounted(() => window.removeEventListener('hashchange', readHash))
 <span class="muted">工作空间</span>
 <span class="breadcrumb-separator">/</span>{{ current.label }}</div>
 <span class="topbar-right">
-<span class="env-pill">本地工作空间</span>
-<span class="user-avatar">知</span>
+<button class="magic-replay" type="button" aria-label="重播魔法开屏动画" @click="entrance?.play()"><AppIcon name="spark" :size="15" /><span>一点魔法</span></button>
+<span class="env-pill">{{currentUser?.username}} · {{currentUser?.role}}</span><button @click="logout">退出</button>
+<FairyIcon name="spark" :size="36" portrait />
 </span>
 </header>
-      <main :class="{ 'chat-page': activeTab === 'chat' }">
+      <main :class="[{ 'chat-page': activeTab === 'chat' }, `page-${activeTab}`]">
         <div v-if="error" class="notice error" role="alert">无法连接后端：{{ error }} <button @click="load" :disabled="busy">重试</button>
 </div>
-        <div v-if="activeTab !== 'chat' && activeTab !== 'usage'" class="page-heading">
+<div v-if="activeTab !== 'chat' && activeTab !== 'knowledge'" class="page-heading">
 <div>
-<div class="eyebrow">{{ activeTab === 'usage' ? 'USAGE & ANALYTICS' : 'YOUR KNOWLEDGE, CONNECTED' }}</div>
+<div class="eyebrow">{{ { retrieval: 'DISCOVER THE CONNECTIONS', usage: 'EVERY LITTLE SPARK COUNTS', settings: 'YOUR MAGIC TOOLKIT' }[activeTab] }}</div>
 <h1>{{ current.label }}</h1>
 <p>{{ current.description }}</p>
 </div>
-<span class="page-index">{{ String(tabs.findIndex(tab => tab.id === activeTab) + 1).padStart(2, '0') }} / 05</span>
+<FairyIcon :name="current.icon" :size="76" portrait />
 </div>
         <KnowledgeWorkspace v-if="activeTab === 'knowledge'" :bases="bases" :loading="busy" :refresh="refreshBases" @navigate="navigate" />
         <KeepAlive :max="2">
           <RetrievalWorkspace v-if="activeTab === 'retrieval' || activeTab === 'chat'" :key="activeTab" :mode="activeTab" :bases="bases" :providers="providers" :initial-base-id="selectedBaseIds[activeTab] || ''" :base-request="baseRequests[activeTab] || 0" />
         </KeepAlive>
-        <UsageDashboard v-if="activeTab === 'usage'" :providers="providers" :bases="bases" />
-        <ProviderSettings v-if="activeTab === 'settings'" :providers="providers" :refresh="refreshProviders" />
+        <TalentWorkspace v-if="activeTab === 'talents'" :bases="bases" />
+        <JobsWorkspace v-if="activeTab === 'jobs'" />
+        <TeamWorkspace v-if="activeTab === 'team'" :bases="bases" @refresh="refreshBases" />
+        <UsageDashboard v-if="activeTab === 'usage' && currentUser?.role === 'admin'" :providers="providers" :bases="bases" />
+        <ProviderSettings v-if="activeTab === 'settings' && currentUser?.role === 'admin'" :providers="providers" :refresh="refreshProviders" />
       </main>
     </div>
   </div>
+  </template>
 </template>

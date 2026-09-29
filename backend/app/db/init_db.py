@@ -7,8 +7,28 @@ from app.db.session import Base, engine
 
 
 def init_db() -> None:
-    # Additive initialization keeps existing knowledge, providers and legacy logs.
-    Base.metadata.create_all(bind=engine)
+    # Production upgrades are explicit migrations, never an implicit create_all upgrade.
+    if settings.app_env == 'production':
+        from alembic import command
+        from alembic.config import Config
+        from sqlalchemy import inspect, text
+        from pathlib import Path
+        tables = inspect(engine).get_table_names()
+        if tables:
+            with engine.connect() as conn:
+                stamped = 'alembic_version' in tables and conn.execute(text('SELECT version_num FROM alembic_version')).first()
+            if not stamped:
+                raise RuntimeError('Existing database has no migration version. Back up and run scripts/prepare_production.py before production startup.')
+        config = Config(str(Path(__file__).resolve().parents[2] / 'alembic.ini'))
+        config.set_main_option('script_location', str(Path(__file__).resolve().parents[2] / 'alembic'))
+        command.upgrade(config, 'head')
+    else:
+        Base.metadata.create_all(bind=engine)
+        # create_all does not add columns to an existing local database.
+        from sqlalchemy import inspect, text
+        if 'enable_thinking' not in {c['name'] for c in inspect(engine).get_columns('ai_providers')}:
+            with engine.begin() as connection:
+                connection.execute(text('ALTER TABLE ai_providers ADD COLUMN enable_thinking BOOLEAN'))
 
 
 def seed_db(db: Session) -> None:

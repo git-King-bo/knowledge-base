@@ -10,7 +10,8 @@ test('navigation retains search results, history snapshots and independent chat 
   const oldHash = window.location.hash
   let searches = 0
   globalThis.fetch = async input => {
-    const url = new URL(String(input))
+    const url = new URL(String(input), 'http://localhost')
+    if (url.pathname.endsWith('/auth/me')) return Response.json({id:'tester',username:'tester',role:'admin',enabled:true})
     if (url.pathname.endsWith('/knowledge/bases')) return Response.json([{
       id: 'base', name: '测试库', description: '', tags: [], status: 'active', source_count: 1,
       chunk_count: 10, created_at: '2026-09-17T00:00:00', updated_at: '2026-09-17T00:00:00',

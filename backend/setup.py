@@ -7,6 +7,8 @@ setup(
     packages=find_packages(),
     install_requires=[
         "alembic>=1.13.2",
+        "cryptography>=46,<47",
+        "numpy>=2,<3",
         "fastapi>=0.115.0",
         "httpx>=0.28.1",
         "openpyxl>=3.1.5,<4",

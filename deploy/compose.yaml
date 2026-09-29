@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    env_file: production.env
+    volumes:
+      - workspace:/data
+    restart: unless-stopped
+    stop_grace_period: 300s
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    ports: ["80:80", "443:443"]
+    volumes: ["caddy_data:/data", "caddy_config:/config"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  workspace:
+  caddy_data:
+  caddy_config:

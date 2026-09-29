@@ -9,12 +9,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.ai.registry import infer_provider
+from app.core.security import encrypt_secret, decrypt_secret, validate_provider_url, actor
 from app.db.models import (
     AIActivityLogModel,
     TokenUsageModel,
     AIModelModel,
     AIProviderModel,
     KnowledgeBaseModel,
+    TrashModel,
     KnowledgeBaseSourceModel,
     KnowledgeChunkEmbeddingModel,
     KnowledgeChunkModel,
@@ -50,6 +53,7 @@ def _provider_from_model(model: AIProviderModel) -> ProviderConfig:
         base_url=model.base_url,
         api_key_hint=model.api_key_hint,
         default_model=model.default_model,
+        enable_thinking=model.enable_thinking,
         is_default=model.is_default,
     )
 
@@ -69,7 +73,7 @@ def _model_from_model(model: AIModelModel) -> ProviderModel:
 def _api_key_from_model(model: AIProviderModel) -> str | None:
     if not model.api_key_encrypted and model.id == "provider-agent-default" and settings.default_api_key:
         return settings.default_api_key
-    return model.api_key_encrypted or None
+    return decrypt_secret(model.api_key_encrypted)
 
 
 def _now() -> datetime:
@@ -199,16 +203,18 @@ class AIRepository:
         return _provider_from_model(model), _api_key_from_model(model)
 
     def create_provider(self, payload: ProviderCreate) -> ProviderConfig:
+        provider_type = infer_provider(payload.base_url) if payload.provider == "auto" else payload.provider
         has_key = bool(payload.api_key and payload.api_key.get_secret_value())
         is_first = self.db.scalar(select(func.count(AIProviderModel.id))) == 0
         model = AIProviderModel(
             id=str(uuid4()),
             name=payload.name,
-            provider=payload.provider,
-            base_url=payload.base_url,
-            api_key_encrypted=payload.api_key.get_secret_value() if payload.api_key else "",
+            provider=provider_type,
+            base_url="local://mock" if provider_type == "mock" else validate_provider_url(payload.base_url),
+            api_key_encrypted=encrypt_secret(payload.api_key.get_secret_value()) if payload.api_key else "",
             api_key_hint="已填写" if has_key else "未填写",
             default_model=payload.default_model,
+            enable_thinking=payload.enable_thinking,
             is_default=is_first,
         )
         self.db.add(model)
@@ -233,11 +239,21 @@ class AIRepository:
             return None
 
         updates = payload.model_dump(exclude_unset=True, exclude_none=True)
+        if "enable_thinking" in payload.model_fields_set:
+            updates["enable_thinking"] = payload.enable_thinking
+        if updates.get("provider") == "auto" or ("base_url" in updates and "provider" not in updates):
+            updates["provider"] = infer_provider(updates.get("base_url", model.base_url))
+        if "base_url" in updates:
+            if updates.get("provider", model.provider) != "mock":
+                validate_provider_url(updates["base_url"])
+            if updates["base_url"].rstrip("/") != model.base_url.rstrip("/") and "api_key" not in updates:
+                from fastapi import HTTPException
+                raise HTTPException(400, "变更模型地址必须同时重新提供密钥，防止原密钥发往新服务")
         if updates.get("is_default") is True:
             self._clear_default_provider()
         if "api_key" in updates:
             api_key = updates.pop("api_key")
-            model.api_key_encrypted = api_key.get_secret_value() if api_key else ""
+            model.api_key_encrypted = encrypt_secret(api_key.get_secret_value()) if api_key else ""
             model.api_key_hint = "已填写" if api_key else "未填写"
 
         for key, value in updates.items():
@@ -289,6 +305,16 @@ class AIRepository:
         usage: TokenUsage | None = None,
         knowledge_base_id: str | None = None,
     ) -> AIActivityLog:
+        from app.core.security import usage_counter
+        counter = usage_counter.get()
+        if counter is not None:
+            counter['calls'] += 1
+            estimate=counter['pending'].pop(0) if counter.get('pending') else 0
+            if usage and usage.total_tokens is not None:
+                counter['tokens'] += usage.total_tokens
+            else:
+                counter['unknown'] = True
+                counter['unknown_tokens'] = counter.get('unknown_tokens',0) + estimate
         record = AIActivityLogModel(
             id=str(uuid4()),
             action=action,
@@ -329,7 +355,7 @@ class KnowledgeIngestionRepository:
 
     def list_knowledge_bases(self) -> list[KnowledgeBase]:
         rows = self.db.scalars(
-            select(KnowledgeBaseModel).order_by(KnowledgeBaseModel.updated_at.desc(), KnowledgeBaseModel.name.asc())
+            select(KnowledgeBaseModel).where(~KnowledgeBaseModel.id.in_(select(TrashModel.base_id))).order_by(KnowledgeBaseModel.updated_at.desc(), KnowledgeBaseModel.name.asc())
         ).all()
         result: list[KnowledgeBase] = []
         for item in rows:
@@ -357,6 +383,10 @@ class KnowledgeIngestionRepository:
         self.db.add(record)
         self.db.commit()
         self.db.refresh(record)
+        if actor.get():
+            from app.db.models import BaseAccessModel
+            self.db.add(BaseAccessModel(base_id=record.id, user_id=actor.get().id, role="editor"))
+            self.db.commit()
         return _knowledge_base_to_schema(record)
 
     def update_knowledge_base(self, knowledge_base_id: str, payload: KnowledgeBaseUpdate) -> KnowledgeBase | None:
@@ -378,7 +408,10 @@ class KnowledgeIngestionRepository:
         record = self.db.get(KnowledgeBaseModel, knowledge_base_id)
         if not record:
             return False
-        self.db.delete(record)
+        from app.db.models import TrashModel
+        if not self.db.get(TrashModel, record.id):
+            self.db.add(TrashModel(base_id=record.id, deleted_at=_now(), previous_status=record.status))
+        record.status = "archived"
         self.db.commit()
         return True
 
@@ -433,12 +466,12 @@ class KnowledgeIngestionRepository:
         ).all()
         return [_source_to_schema(item) for item in rows]
 
-    def list_base_chunks(self, knowledge_base_id: str) -> list[KnowledgeChunk]:
+    def list_base_chunks(self, knowledge_base_id: str, offset: int = 0, limit: int = 100) -> list[KnowledgeChunk]:
         rows = self.db.scalars(
             select(KnowledgeChunkModel)
             .join(KnowledgeBaseSourceModel, KnowledgeBaseSourceModel.source_id == KnowledgeChunkModel.source_id)
             .where(KnowledgeBaseSourceModel.knowledge_base_id == knowledge_base_id)
-            .order_by(KnowledgeChunkModel.created_at.desc(), KnowledgeChunkModel.chunk_index.asc())
+            .order_by(KnowledgeChunkModel.created_at.desc(), KnowledgeChunkModel.chunk_index.asc()).offset(offset).limit(limit)
         ).all()
         return [_chunk_to_schema(item) for item in rows]
 
@@ -622,16 +655,21 @@ class KnowledgeIngestionRepository:
         if knowledge_base_id:
             active_sources = active_sources.where(KnowledgeBaseModel.id == knowledge_base_id)
         statement = statement.where(KnowledgeChunkModel.source_id.in_(active_sources))
+        from app.db.models import SourceIndexModel
+        stale_sources = select(SourceIndexModel.source_id).where(SourceIndexModel.edited.is_(True), SourceIndexModel.revision != SourceIndexModel.indexed_revision)
+        statement = statement.where(~KnowledgeChunkModel.source_id.in_(stale_sources))
         rows = self.db.execute(statement).all()
+        dense = {}
+        if query_embedding:
+            from app.services.retrieval_cache import dense_scores
+            dense = dense_scores(rows, query_embedding, embedding_model, str(self.db.get_bind().url))
         results: list[KnowledgeChunk] = []
         for record, embedding in rows:
             vector = json.loads(record.vector_json or "{}")
             lexical_score = _cosine_similarity(query_vector, {key: int(value) for key, value in vector.items()})
             embedding_score = 0.0
             if query_embedding and embedding and (embedding_model is None or embedding.embedding_model == embedding_model):
-                stored_embedding = json.loads(embedding.embedding_json or "[]")
-                stored_embedding = [float(value) for value in stored_embedding]
-                embedding_score = _dense_cosine_similarity(query_embedding, stored_embedding)
+                embedding_score = dense.get(record.id, 0.0)
 
             if lexical_score <= 0 and embedding_score <= 0:
                 continue

@@ -9,6 +9,7 @@ from app.schemas.usage import TokenUsage
 import httpx
 
 from app.core.config import settings
+from app.core.security import validate_provider_url
 
 
 @dataclass(slots=True)
@@ -33,7 +34,8 @@ class EmbeddingClient:
         return bool(self.config.api_url.strip() and self.config.model.strip())
 
     def _client(self) -> httpx.Client:
-        return httpx.Client(base_url=self.config.api_url.rstrip("/"), timeout=60.0)
+        validate_provider_url(self.config.api_url, resolve=True)
+        return httpx.Client(base_url=self.config.api_url.rstrip("/"), timeout=60.0, trust_env=False)
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -66,6 +68,8 @@ class EmbeddingClient:
     def _embed_texts(self, texts: list[str]) -> tuple[list[list[float]], TokenUsage]:
         if not self.enabled:
             raise RuntimeError("Embedding config is not enabled")
+        from app.core.limits import claim_token_reservation
+        claim_token_reservation(sum(len(text.encode("utf-8")) + 32 for text in texts))
         payload = {
             "model": self.config.model,
             "input": texts,

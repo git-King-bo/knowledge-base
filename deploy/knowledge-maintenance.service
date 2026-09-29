@@ -1,0 +1,8 @@
+[Unit]
+Description=Knowledge workspace backup and retention
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/knowledge-base/backend
+ExecStart=/opt/knowledge-base/backend/.venv/bin/python scripts/maintenance.py
+User=knowledge
+UMask=0077

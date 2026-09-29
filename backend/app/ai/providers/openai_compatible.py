@@ -1,8 +1,11 @@
 import json
+from urllib.parse import urlsplit
 
 from app.schemas.usage import ChatResult, TokenUsage, StreamChunk
 
 import httpx
+from app.core.config import settings
+from app.core.security import validate_provider_url
 
 from app.ai.base import AIProvider
 from app.schemas.ai import ChatMessage, ProviderConfig, ProviderTestResult
@@ -20,7 +23,8 @@ class OpenAICompatibleProvider(AIProvider):
         return headers
 
     def _client(self, config: ProviderConfig) -> httpx.Client:
-        return httpx.Client(base_url=config.base_url.rstrip("/"), timeout=60.0)
+        validate_provider_url(config.base_url, resolve=True)
+        return httpx.Client(base_url=config.base_url.rstrip("/"), timeout=60.0, trust_env=False)
 
     def test(self, config: ProviderConfig, api_key: str | None = None) -> ProviderTestResult:
         try:
@@ -34,12 +38,30 @@ class OpenAICompatibleProvider(AIProvider):
                 message=f"Provider test failed: {exc}",
             )
 
+        try:
+            models = response.json().get("data", [])
+            identifiers = [item.get("id") for item in models if isinstance(item, dict)]
+        except (ValueError, AttributeError, TypeError):
+            identifiers = []
+        if identifiers and config.default_model not in identifiers:
+            return ProviderTestResult(provider_id=config.id, ok=False,
+                message="服务已连接，但配置的模型不在可用列表中，请检查模型名称的大小写和访问权限。")
         return ProviderTestResult(
             provider_id=config.id,
             ok=True,
             message="Provider reachable and models endpoint responded successfully.",
             details={"base_url": config.base_url, "provider": config.provider},
         )
+
+    def _thinking_parameters(self, config, model):
+        parameters = {}
+        if config.enable_thinking is not None:
+            parameters["enable_thinking"] = config.enable_thinking
+        host = (urlsplit(config.base_url).hostname or '').lower()
+        if host.endswith('.aliyuncs.com') and model.startswith('qwen3.8-'):
+            # This application stores answer-only history, without reasoning_content.
+            parameters["preserve_thinking"] = False
+        return parameters
 
     def chat(
         self,
@@ -48,13 +70,18 @@ class OpenAICompatibleProvider(AIProvider):
         model: str | None = None,
         api_key: str | None = None,
     ) -> ChatResult:
+        from app.core.limits import claim_model_input
+        claim_model_input(messages)
         selected_model = model or config.default_model
         payload = {
             "model": selected_model,
             "messages": [message.model_dump() for message in messages],
             "stream": False,
             "temperature": 0.2,
+            "max_tokens": settings.model_max_output_tokens,
         }
+
+        payload.update(self._thinking_parameters(config, payload["model"]))
 
         with self._client(config) as client:
             response = client.post(
@@ -79,16 +106,21 @@ class OpenAICompatibleProvider(AIProvider):
         raise RuntimeError("Provider returned no answer content")
 
     def _async_client(self, config: ProviderConfig) -> httpx.AsyncClient:
-        return httpx.AsyncClient(base_url=config.base_url.rstrip("/"), timeout=60.0)
+        validate_provider_url(config.base_url, resolve=True)
+        return httpx.AsyncClient(base_url=config.base_url.rstrip("/"), timeout=60.0, trust_env=False)
 
     async def stream_chat(self, config, messages, model=None, api_key=None):
+        from app.core.limits import claim_model_input
+        claim_model_input(messages)
         payload = {
             "model": model or config.default_model,
             "messages": [message.model_dump() for message in messages],
             "stream": True,
             "stream_options": {"include_usage": True},
             "temperature": 0.2,
+            "max_tokens": settings.model_max_output_tokens,
         }
+        payload.update(self._thinking_parameters(config, payload["model"]))
         async with self._async_client(config) as client:
             async with client.stream("POST", "/chat/completions",
                                      headers=self._auth_headers(api_key), json=payload) as response:

@@ -27,6 +27,8 @@ const paths: Record<string, string> = {
   send: 'M12 19V5 M6 11l6-6 6 6',
   reset: 'M4 10a8 8 0 1 1 1 8 M4 4v6h6 M12 8v4l3 2',
   link: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2',
+  switch: 'M4 7h15 M15 3l4 4-4 4 M20 17H5 M9 13l-4 4 4 4',
+  trash: 'M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7',
   clock: 'M12 7v5l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
 }
 </script>

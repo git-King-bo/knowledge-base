@@ -44,7 +44,7 @@ class WorkspaceTests(unittest.TestCase):
         app.dependency_overrides[get_db] = database
         # Startup is intentionally omitted: all tests use the isolated database above.
         self.client = TestClient(app)
-        self.patches = [patch.object(settings, 'upload_dir', self.temp.name),
+        self.patches = [patch.object(settings, 'worker_enabled', False), patch.object(settings, 'auth_enabled', False), patch.object(settings, 'security_dir', self.temp.name+'/security'), patch.object(settings, 'upload_dir', self.temp.name),
                         patch.object(settings, 'embedding_api_url', ''),
                         patch.object(settings, 'web_search_enabled', False)]
         for item in self.patches:
@@ -281,6 +281,77 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIsNone(TokenUsage.from_response({}).total_tokens)
         self.assertIsNone(TokenUsage.from_response({'usage': {'prompt_tokens': -1}}).input_tokens)
         self.assertIsNone(TokenUsage.from_response({'usage': {'total_tokens': True}}).total_tokens)
+
+
+    def test_thinking_choice_roundtrips_and_is_sent_in_chat(self):
+        import json
+        for choice in [True,False,None]:
+            result=self.client.put('/api/ai/providers/fixture',json={'enable_thinking':choice})
+            self.assertEqual(result.status_code,200,result.text)
+            self.assertIs(result.json()['enable_thinking'],choice)
+            listed=self.client.get('/api/ai/providers').json()
+            self.assertIs(next(p for p in listed if p['id']=='fixture')['enable_thinking'],choice)
+            result=self.client.post('/api/ai/chat',json={'provider_id':'fixture','messages':[{'role':'user','content':'test'}]})
+            self.assertEqual(result.status_code,200,result.text)
+            payload=json.loads(self.requests[-1].content)
+            if choice is None:self.assertNotIn('enable_thinking',payload)
+            else:self.assertIs(payload['enable_thinking'],choice)
+        self.client.put('/api/ai/providers/fixture',json={'enable_thinking':False})
+        result=self.client.put('/api/ai/providers/fixture',json={'name':'Renamed'})
+        self.assertIs(result.json()['enable_thinking'],False)
+
+    def test_thinking_choice_is_sent_in_streaming_requests(self):
+        import asyncio,json
+        from app.schemas.ai import ChatMessage
+        captured=[]
+        def handler(request):
+            captured.append(json.loads(request.content))
+            return httpx.Response(200,headers={'content-type':'text/event-stream'},
+                text='data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n')
+        async def consume(config):
+            adapter=OpenAICompatibleProvider()
+            with patch.object(adapter,'_async_client',side_effect=lambda config:httpx.AsyncClient(base_url=config.base_url,transport=httpx.MockTransport(handler))):
+                return [chunk async for chunk in adapter.stream_chat(config,[ChatMessage(role='user',content='test')])]
+        for choice in [True,False,None]:
+            self.client.put('/api/ai/providers/fixture',json={'enable_thinking':choice})
+            config,_=AIRepository(self.db).get_provider_credentials('fixture')
+            chunks=asyncio.run(consume(config))
+            self.assertEqual(chunks[0].delta,'ok')
+            if choice is None:self.assertNotIn('enable_thinking',captured[-1])
+            else:self.assertIs(captured[-1]['enable_thinking'],choice)
+
+
+    def test_provider_protocol_is_inferred_when_omitted(self):
+        cases=[('https://dashscope.aliyuncs.com/compatible-mode/v1','qwen'),
+               ('https://dashscope-intl.aliyuncs.com/compatible-mode/v1','qwen'),
+               ('https://api.openai.com/v1','openai'),
+               ('https://api.deepseek.com/v1','deepseek'),
+               ('https://custom.example/v1','openai-compatible'),
+               ('local://mock','mock')]
+        for address,expected in cases:
+            result=self.client.post('/api/ai/providers',json={'name':'Automatic','base_url':address,'default_model':'test'})
+            self.assertEqual(result.status_code,201,result.text)
+            self.assertEqual(result.json()['provider'],expected)
+        result=self.client.put('/api/ai/providers/fixture',json={'base_url':'https://dashscope.aliyuncs.com/compatible-mode/v1','api_key':'test-only-key'})
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(result.json()['provider'],'qwen')
+
+
+    def test_model_connection_test_checks_exact_model_identifier(self):
+        transport=httpx.MockTransport(lambda request:httpx.Response(200,json={'data':[{'id':'qwen3.8-max'}]}))
+        config,_=AIRepository(self.db).get_provider_credentials('fixture')
+        adapter=OpenAICompatibleProvider()
+        with patch.object(adapter,'_client',side_effect=lambda config:httpx.Client(base_url=config.base_url,transport=transport)):
+            self.assertFalse(adapter.test(config.model_copy(update={'default_model':'Qwen3.8-Max'})).ok)
+            self.assertTrue(adapter.test(config.model_copy(update={'default_model':'qwen3.8-max'})).ok)
+
+    def test_qwen38_answer_only_history_disables_reasoning_preservation(self):
+        config,_=AIRepository(self.db).get_provider_credentials('fixture')
+        adapter=OpenAICompatibleProvider()
+        ali=config.model_copy(update={'base_url':'https://dashscope.aliyuncs.com/compatible-mode/v1','enable_thinking':True})
+        self.assertEqual(adapter._thinking_parameters(ali,'qwen3.8-max'),{'enable_thinking':True,'preserve_thinking':False})
+        self.assertNotIn('preserve_thinking',adapter._thinking_parameters(config,'qwen3.8-max'))
+        self.assertNotIn('preserve_thinking',adapter._thinking_parameters(ali,'qwen-plus'))
 
 
 if __name__ == '__main__':

@@ -7,6 +7,7 @@ export interface ProviderConfig {
   baseUrl: string
   apiKeyHint: string
   defaultModel: string
+  enableThinking?: boolean | null
   isDefault: boolean
 }
 
@@ -46,6 +47,7 @@ export interface KnowledgeChunk {
   id: string
   sourceId: string
   chunkIndex: number
+  citationIndex?: number
   title: string | null
   content: string
   tokenCount: number
@@ -66,7 +68,7 @@ export interface TalentResult {
   error?: string
   scanned_records: number
   matched_records: number
-  missing_sort_values: number
+  missing_sort_values: number | null
   returned_records: number
   truncated: boolean
   plan: { sort_by: string | null; descending: boolean; filters: { field: string; op: string; value: string }[] }

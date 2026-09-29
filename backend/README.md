@@ -23,3 +23,5 @@ API 分组：
 ```
 
 配置、统计口径、数据库迁移及版本边界见 [项目说明](../README.md)。
+
+生产部署、首次登录、人才管理与去重导入见 [实施与验收](../docs/production-implementation.md)。新上传接口 `/api/imports/{knowledge_base_id}` 返回持久任务，`/api/jobs` 查询任务；`/api/talents` 提供结构化人才管理。

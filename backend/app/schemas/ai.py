@@ -11,9 +11,11 @@ class ProviderConfigBase(BaseModel):
     provider: str = Field(min_length=1, max_length=40)
     base_url: str = Field(min_length=1, max_length=300)
     default_model: str = Field(min_length=1, max_length=120)
+    enable_thinking: bool | None = None
 
 
 class ProviderCreate(ProviderConfigBase):
+    provider: str = Field(default="auto", min_length=1, max_length=40)
     api_key: SecretStr | None = None
 
 
@@ -24,6 +26,7 @@ class ProviderUpdate(BaseModel):
     default_model: str | None = Field(default=None, min_length=1, max_length=120)
     api_key: SecretStr | None = None
     is_default: bool | None = None
+    enable_thinking: bool | None = None
 
 
 class ProviderConfig(ProviderConfigBase):
@@ -58,7 +61,7 @@ class ProviderTestResult(BaseModel):
 
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
-    content: str
+    content: str = Field(max_length=32000)
 
 
 class ChatRequest(BaseModel):

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
-import { createKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase, fetchKnowledgeBaseSources, fetchKnowledgeBaseChunks, uploadKnowledgeBaseFile, removeKnowledgeBaseSource, rebuildKnowledgeSourceEmbeddings } from '../lib/api'
+import { computed, reactive, ref, onBeforeUnmount } from 'vue'
+import { submitImport, request, createKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase, fetchKnowledgeBaseSources, fetchKnowledgeBaseChunks, removeKnowledgeBaseSource } from '../lib/api'
+import { currentUser } from '../lib/auth'
 import type { KnowledgeBase, KnowledgeSource, KnowledgeChunk } from '../lib/types'
 import { useTask } from '../composables/useTask'
 import AppIcon from '../components/AppIcon.vue'
+import FairyIcon from '../components/FairyIcon.vue'
 import AppSelect from '../components/AppSelect.vue'
 import AppDialog from '../components/AppDialog.vue'
 import MacDialog from '../components/MacDialog.vue'
@@ -11,6 +13,7 @@ import FilePreview from '../components/FilePreview.vue'
 const props = defineProps<{ bases: KnowledgeBase[]; loading: boolean; refresh: () => Promise<void> }>()
 const emit = defineEmits<{ navigate: [tab: string, baseId: string] }>()
 const { busy, error, run } = useTask()
+const canEdit = computed(() => !currentUser.value || currentUser.value.role !== 'viewer')
 const query = ref('')
 const status = ref('active')
 const selectedId = ref('')
@@ -31,6 +34,11 @@ const previewingSource = ref<KnowledgeSource>()
 const form = reactive({ name: '', description: '', tags: '' })
 const notice = ref('')
 const uploadProgress = ref('')
+const chunkOffset = ref(0)
+const canLoadChunks = ref(false)
+let poll: ReturnType<typeof setInterval> | undefined
+onBeforeUnmount(() => clearInterval(poll))
+async function moreChunks() { const more = await fetchKnowledgeBaseChunks(selectedId.value, chunkOffset.value); chunks.value.push(...more); chunkOffset.value += more.length; canLoadChunks.value = more.length === 100 }
 const filtered = computed(() => props.bases.filter(base => (status.value === 'all' || base.status === status.value) && `${base.name} ${base.description} ${base.tags.join(' ')}`.toLowerCase().includes(query.value.toLowerCase())))
 const displayedChunks = computed(() => chunks.value.filter(chunk => !sourceFilter.value || chunk.sourceId === sourceFilter.value))
 const totalSources = computed(() => props.bases.reduce((sum, base) => sum + base.sourceCount, 0))
@@ -38,7 +46,7 @@ const totalChunks = computed(() => props.bases.reduce((sum, base) => sum + base.
 const date = (value: string) => new Date(value.endsWith('Z') ? value : `${value}Z`).toLocaleDateString('zh-CN')
 async function loadDetail(id = selectedId.value) {
   const [nextSources, nextChunks] = await Promise.all([fetchKnowledgeBaseSources(id), fetchKnowledgeBaseChunks(id)])
-  sources.value = nextSources; chunks.value = nextChunks
+  sources.value = nextSources; chunks.value = nextChunks; chunkOffset.value = nextChunks.length; canLoadChunks.value = nextChunks.length === 100
 }
 function openBase(base: KnowledgeBase) {
   selectedId.value = base.id; sources.value = []; chunks.value = []; notice.value = ''; sourceFilter.value = ''; detailTab.value = 'sources'
@@ -86,23 +94,41 @@ function upload(event: Event) {
         uploadProgress.value = `正在处理 ${index + 1}/${files.length} · ${file.name}`
         try {
           if (file.size > 20 * 1024 * 1024) throw new Error('超过 20 MB')
-          await uploadKnowledgeBaseFile(selectedId.value, file); complete++
+          const result = await submitImport(selectedId.value, file, preview => window.confirm(`${file.name}\n${preview.talent_records ? `检测到 ${preview.talent_records} 条人才记录，${preview.fields.length} 个字段，同名额外记录 ${preview.duplicate_name_rows} 条。\n字段：${preview.fields.join('、')}` : `可解析文本 ${preview.characters} 字。`}\n确认导入？`)); complete++; if(result.reused) notice.value = `${file.name} 已复用已有结果，无需重新解析或向量化。`
         } catch (cause) { failures.push(`${file.name}：${cause instanceof Error ? cause.message : '导入失败'}`) }
       }
       await props.refresh(); await loadDetail()
-      notice.value = `${complete} 份资料已导入。`
+      notice.value = `${complete} 份资料已接收。重复文件直接复用，其余在后台处理，可到「后台任务」查看。`
+      clearInterval(poll)
+      poll = setInterval(async () => { if(selectedId.value) { try { await loadDetail(); await props.refresh() } catch { /* next poll retries */ } } }, 5000)
       if (failures.length) throw new Error(failures.join('；'))
     } finally { uploadProgress.value = '' }
   })
 }
 function rebuild(source: KnowledgeSource) {
-  void run(async () => { await rebuildKnowledgeSourceEmbeddings(source.id, selectedId.value); await loadDetail(); notice.value = '向量索引已重建。' })
+  void run(async () => { await request(`/indexes/${source.id}/rebuild?knowledge_base_id=${selectedId.value}`, {method:'POST'}); notice.value = '索引重建已加入后台任务。' })
 }
 </script>
 <template>
   <div v-if="error && !dialog" class="notice error" role="alert">{{ error }}</div>
   <div v-if="notice" class="notice success" role="status">{{ notice }}</div>
   <template v-if="!selected">
+    <section class="knowledge-hero">
+      <div class="hero-copy">
+        <div class="hero-kicker"><AppIcon name="spark" :size="14" /> A LITTLE KNOWLEDGE MAGIC</div>
+        <h1>把知识，<br />变成<span>一点魔法。</span></h1>
+        <p>让零散的资料，在这里相遇。<br />和知识精灵一起，发现藏在信息里的灵感。</p>
+        <div class="hero-actions">
+          <button v-if="canEdit" class="primary" :disabled="loading || busy" @click="openForm('create', $event)"><AppIcon name="plus" :size="17" />创建知识库<AppIcon name="arrow" :size="16" /></button>
+          <button class="hero-secondary" @click="emit('navigate', 'chat', '')"><AppIcon name="spark" :size="16" />探索知识问答</button>
+        </div>
+      </div>
+      <div class="fairy-garden" aria-hidden="true">
+        <span class="garden-halo" /><span class="garden-spark spark-a">✧</span><span class="garden-spark spark-b">✦</span>
+        <img src="/mascot/knowledge-fairy.webp" alt="" width="616" height="640" fetchpriority="high" />
+        <span class="garden-note"><AppIcon name="book" :size="15" /> 每一份知识，都值得珍藏</span>
+      </div>
+    </section>
     <section class="stat-grid three">
 <article class="stat-card">
 <span>知识库总数<AppIcon name="book" />
@@ -123,6 +149,7 @@ function rebuild(source: KnowledgeSource) {
 </strong>
 </article>
 </section>
+    <div class="library-heading"><div><span class="eyebrow">KNOWLEDGE COLLECTION</span><h2>我的知识库 <span>{{ bases.length.toString().padStart(2, '0') }}</span></h2></div><span class="library-caption">将零散的信息，沉淀为有序的知识</span></div>
     <div class="section-toolbar">
 <div class="segmented">
 <button v-for="option in [{ id: 'active', label: '使用中' }, { id: 'archived', label: '已归档' }, { id: 'all', label: '全部' }]" :key="option.id" :class="{ selected: status === option.id }" @click="status = option.id">{{ option.label }}</button>
@@ -132,7 +159,7 @@ function rebuild(source: KnowledgeSource) {
 <AppIcon name="search" :size="17" />
 <input v-model="query" aria-label="搜索知识库" placeholder="搜索知识库名称、标签…" />
 </label>
-<button class="primary" :disabled="loading || busy" @click="openForm('create', $event)">
+<button v-if="canEdit" class="primary" :disabled="loading || busy" @click="openForm('create', $event)">
 <AppIcon name="plus" :size="17" />新建知识库</button>
 </div>
 </div>
@@ -140,11 +167,10 @@ function rebuild(source: KnowledgeSource) {
     <section v-else-if="filtered.length" class="base-grid">
 <button v-for="(base, index) in filtered" :key="base.id" class="base-card" :disabled="busy" @click="openBase(base)">
 <div class="base-card-top">
-<span class="base-symbol" :class="`tone-${index % 3}`">
-<AppIcon name="book" :size="25" />
-</span>
+<FairyIcon :name="['book', 'layers', 'file'][index % 3]" :size="54" />
 <span class="badge" :class="base.status === 'active' ? 'green' : ''">{{ base.status === 'active' ? '使用中' : '已归档' }}</span>
 </div>
+<span class="collection-number">COLLECTION / {{ String(index + 1).padStart(2, '0') }}</span>
 <h2>{{ base.name }}</h2>
 <p>{{ base.description || '添加资料，构建专属知识空间。' }}</p>
 <div class="tags">
@@ -160,9 +186,7 @@ function rebuild(source: KnowledgeSource) {
 </button>
 </section>
     <div v-else class="empty-state panel">
-<span class="empty-icon">
-<AppIcon name="book" :size="32" />
-</span>
+<FairyIcon name="book" :size="76" portrait />
 <h2>{{ bases.length ? '没有符合条件的知识库' : '让知识，从这里开始' }}</h2>
 <p>{{ bases.length ? '尝试调整搜索词或切换知识库状态。' : '创建一个知识库，导入资料，验证检索，然后开始提问。' }}</p>
 <button v-if="!bases.length" class="primary" @click="openForm('create', $event)">
@@ -188,15 +212,13 @@ function rebuild(source: KnowledgeSource) {
 <button class="text-button" :disabled="busy" @click="selectedId = ''; notice = ''; error = ''">
 <AppIcon name="back" :size="17" />全部知识库</button>
 <div class="toolbar-actions">
-<button :disabled="busy" @click="openForm('edit', $event)">编辑信息</button>
-<button :disabled="busy" @click="archive">{{ selected.status === 'active' ? '归档' : '恢复使用' }}</button>
-<button class="danger-text" :disabled="busy" @click="dialog = 'delete'">删除知识库</button>
+<button v-if="canEdit" :disabled="busy" @click="openForm('edit', $event)">编辑信息</button>
+<button v-if="canEdit" :disabled="busy" @click="archive">{{ selected.status === 'active' ? '归档' : '恢复使用' }}</button>
+<button v-if="canEdit" class="danger-text" :disabled="busy" @click="dialog = 'delete'">删除知识库</button>
 </div>
 </div>
     <section class="panel base-detail-header">
-<span class="base-symbol">
-<AppIcon name="book" :size="28" />
-</span>
+<FairyIcon name="book" :size="62" portrait />
 <div>
 <h2>{{ selected.name }} <span class="badge" :class="selected.status === 'active' ? 'green' : ''">{{ selected.status === 'active' ? '使用中' : '已归档' }}</span>
 </h2>
@@ -212,7 +234,7 @@ function rebuild(source: KnowledgeSource) {
 </div>
 </section>
     <div v-if="selected.status === 'archived'" class="notice">此知识库已归档。恢复使用后可继续导入、检索与问答。</div>
-    <label v-else class="upload-zone" :class="{ disabled: busy }">
+    <label v-else-if="canEdit" class="upload-zone" :class="{ disabled: busy }">
 <input type="file" multiple accept=".txt,.md,.markdown,.pdf,.docx,.xlsx,.csv,.json" :disabled="busy" @change="upload" />
 <span class="empty-icon">
 <AppIcon name="upload" :size="25" />
@@ -262,8 +284,8 @@ function rebuild(source: KnowledgeSource) {
 <div class="row-actions">
 <button class="text-button" @click="previewingSource = source">预览</button>
 <button class="text-button" :disabled="busy || !source.chunkCount" @click="sourceFilter = source.id; detailTab = 'chunks'">片段</button>
-<button class="text-button" :disabled="busy || !source.chunkCount" @click="rebuild(source)">重建索引</button>
-<button class="text-button danger-text" :disabled="busy" @click="removingSource = source; dialog = 'remove'">移除</button>
+<button class="text-button" :disabled="busy || !source.chunkCount" v-if="canEdit" @click="rebuild(source)">重建索引</button>
+<button class="text-button danger-text" :disabled="busy" v-if="canEdit" @click="removingSource = source; dialog = 'remove'">移除</button>
 </div>
 </td>
 </tr>
@@ -300,10 +322,11 @@ function rebuild(source: KnowledgeSource) {
 </footer>
 </form>
   </MacDialog>
+  <button v-if="selected && detailTab === 'chunks' && canLoadChunks" @click="run(moreChunks)">加载更多切片</button>
   <FilePreview v-if="previewingSource" :key="previewingSource.id" :base-id="selectedId" :source="previewingSource" @close="previewingSource = undefined" />
   <AppDialog v-if="dialog === 'delete' || dialog === 'remove'" :title="dialog === 'delete' ? '删除知识库' : '移除资料'" @close="!busy && (dialog = '')">
     <div v-if="error" class="notice error" role="alert">{{ error }}</div>
-<p class="dialog-description">{{ dialog === 'delete' ? `确认删除「${selected?.name}」？此操作会删除知识库及其资料关联。` : `确认从此知识库移除「${removingSource?.filename}」？` }}</p>
+<p class="dialog-description">{{ dialog === 'delete' ? `确认删除「${selected?.name}」？此操作会移入回收站，可由管理员恢复。` : `确认从此知识库移除「${removingSource?.filename}」？` }}</p>
 <footer>
 <button :disabled="busy" @click="dialog = ''">取消</button>
 <button class="danger" :disabled="busy" @click="confirmDelete">{{ busy ? '处理中…' : '确认操作' }}</button>

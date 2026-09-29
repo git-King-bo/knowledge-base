@@ -9,7 +9,7 @@ test('file preview pages rows, changes sheets, escapes cells and emits close', a
   const previousFetch = globalThis.fetch
   const calls: URL[] = []
   globalThis.fetch = async input => {
-    const url = new URL(String(input)); calls.push(url)
+    const url = new URL(String(input), 'http://localhost'); calls.push(url)
     const sheet = Number(url.searchParams.get('sheet')), offset = Number(url.searchParams.get('offset'))
     return Response.json({ kind: 'table', sheets: ['名单', '另一表'], columns: 2, columns_truncated: false,
       total: sheet ? 1 : 112, rows: [{ number: offset + 1, cells: [sheet ? '第二张表' : '<script>unsafe</script>', '0'] }] })

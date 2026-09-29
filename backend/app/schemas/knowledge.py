@@ -49,6 +49,7 @@ class KnowledgeChunk(BaseModel):
     id: str
     source_id: str
     chunk_index: int
+    citation_index: int | None = None
     title: str | None = None
     content: str
     token_count: int = 0
@@ -80,6 +81,23 @@ class ContinuationContext(BaseModel):
     answer: str = Field(max_length=200_000)
     sources: list[KnowledgeChunk] = Field(default_factory=list, max_length=12)
     web_sources: list[WebSource] = Field(default_factory=list, max_length=20)
+    retrieval_query: str | None = Field(default=None, max_length=5000)
+
+
+class TalentQueryState(BaseModel):
+    knowledge_base_id: str | None = None
+    query: str = Field(max_length=5000)
+    plan: dict = Field(default_factory=dict, max_length=8)
+    offset: int = Field(default=0, ge=0, le=1_000_000)
+    page_size: int = Field(default=5, ge=1, le=100)
+    returned: int = Field(default=0, ge=0, le=100)
+    has_more: bool = False
+
+
+class ConversationTurn(BaseModel):
+    query_state: TalentQueryState | None = None
+    question: str = Field(min_length=1, max_length=5000)
+    answer: str = Field(min_length=1, max_length=6000)
 
 
 class AskRequest(BaseModel):
@@ -87,9 +105,11 @@ class AskRequest(BaseModel):
     knowledge_base_id: str | None = None
     provider_id: str | None = None
     model: str | None = None
+    talent_page_size: int = Field(default=5, ge=1, le=100)
     top_k: int = Field(default=5, ge=1, le=12)
     web_search_mode: WebSearchMode = "knowledge"
     continuation: ContinuationContext | None = None
+    history: list[ConversationTurn] = Field(default_factory=list, max_length=12)
 
 
 class RowSource(BaseModel):
@@ -102,12 +122,14 @@ class RowSource(BaseModel):
 
 
 class AskResponse(BaseModel):
+    query_state: TalentQueryState | None = None
     answer: str
     provider_id: str
     model: str
     sources: list[KnowledgeChunk]
     web_sources: list[WebSource] = Field(default_factory=list)
     row_sources: list[RowSource] = Field(default_factory=list)
+    retrieval_query: str = ""
 
 
 class AIActivityLog(BaseModel):

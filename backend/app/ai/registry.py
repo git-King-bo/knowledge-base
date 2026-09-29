@@ -1,3 +1,4 @@
+from urllib.parse import urlsplit
 from app.ai.base import AIProvider
 from app.ai.providers.mock import MockProvider
 from app.ai.providers.openai_compatible import OpenAICompatibleProvider
@@ -23,3 +24,18 @@ class AIProviderRegistry:
 
 
 ai_provider_registry = AIProviderRegistry()
+
+
+def infer_provider(base_url: str) -> str:
+    """Choose among the supported adapters; no network probe or credential transfer."""
+    address=base_url.strip().rstrip('/')
+    if address == 'local://mock':
+        return 'mock'
+    host=(urlsplit(address).hostname or '').lower()
+    if host == 'api.openai.com':
+        return 'openai'
+    if host == 'aliyuncs.com' or host.endswith('.aliyuncs.com'):
+        return 'qwen'
+    if host == 'api.deepseek.com':
+        return 'deepseek'
+    return 'openai-compatible'

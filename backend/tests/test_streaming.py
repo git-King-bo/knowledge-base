@@ -34,6 +34,20 @@ class StreamingTests(unittest.TestCase):
         return [(block.splitlines()[0][7:], json.loads(block.splitlines()[1][6:]))
                 for block in response.text.strip().split('\n\n')]
 
+    def test_upstream_404_has_actionable_message_and_is_recorded(self):
+        base=self.base(); self.upload(base)
+        def handler(request):
+            return httpx.Response(404,json={'error':{'message':'model not found; secret=never-display'}})
+        with patch.object(OpenAICompatibleProvider,'_async_client',side_effect=lambda config:httpx.AsyncClient(base_url=config.base_url,transport=httpx.MockTransport(handler))):
+            response=self.client.post('/api/knowledge/ask/stream',json={'question':'发布流程','knowledge_base_id':base})
+        events=self.events(response)
+        message=events[-1][1]['message']
+        self.assertEqual(events[-1][0],'error')
+        self.assertIn('404',message); self.assertIn('大小写',message)
+        self.assertNotIn('已接收',message); self.assertNotIn('never-display',response.text)
+        logs=AIRepository(self.db).list_activity_logs()
+        self.assertTrue(any('404' in item.response_text and not item.success for item in logs))
+
     def test_answer_arrives_in_deltas_and_records_usage_once(self):
         base = self.base()
         self.upload(base)

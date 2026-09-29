@@ -39,6 +39,21 @@ def read_talent_sheets(sources) -> tuple[list[TalentSheet], list[str]]:
     failures = []
     for source in sources:
         try:
+            from sqlalchemy.orm import object_session
+            from sqlalchemy import select
+            from app.db.models import TalentModel
+            db = object_session(source)
+            talents = list(db.scalars(select(TalentModel).where(TalentModel.source_id == source.id).order_by(TalentModel.sheet_name, TalentModel.source_row))) if db else []
+            if talents:
+                grouped = {}
+                for talent in talents:
+                    group = grouped.setdefault(talent.sheet_name, [])
+                    fields = {k: str(v) if v is not None else "" for k, v in json.loads(talent.raw_data_json).items()}
+                    group.append({"row": talent.source_row, "fields": fields, "talent_id": talent.id})
+                for name, rows in grouped.items():
+                    headers = list(dict.fromkeys(k for row in rows for k in row["fields"]))
+                    sheets.append(TalentSheet(source.id, source.filename, name, headers, rows))
+                continue
             workbook = load_workbook(source.storage_path, read_only=True, data_only=True)
             try:
                 for sheet in workbook.worksheets:
@@ -136,7 +151,7 @@ def validate_plan(plan: TalentPlan, sheets: list[TalentSheet]) -> TalentPlan:
     return plan
 
 
-def execute_plan(plan: TalentPlan, sheets: list[TalentSheet]) -> list[dict]:
+def execute_plan(plan: TalentPlan, sheets: list[TalentSheet], *, all_records: bool = False) -> list[dict]:
     validate_plan(plan, sheets)
     results = []
     for sheet in sheets:
@@ -171,20 +186,20 @@ def execute_plan(plan: TalentPlan, sheets: list[TalentSheet]) -> list[dict]:
             '来源链接', '证据链接', 'Google Scholar主页',
         } | needed
         records = [{"excel_row": row['row'], "fields": {key: value for key, value in row['fields'].items()
-                    if key in selected_fields or key.casefold() in NAME_FIELDS}} for row in ordered[:plan.limit]]
+                    if key in selected_fields or key.casefold() in NAME_FIELDS}} for row in (ordered if all_records else ordered[:plan.limit])]
         results.append({"source_id": sheet.source_id, "file": sheet.filename, "sheet": sheet.sheet,
                         "scanned_records": len(sheet.rows), "matched_records": len(matched),
-                        "missing_sort_values": missing, "rankable_records": len(ordered),
+                        "missing_sort_values": missing if plan.sort_by else None, "rankable_records": len(ordered) if plan.sort_by else None,
                         "returned_records": len(records), "truncated": len(ordered) > len(records),
                         "plan": plan.model_dump(), "records": records})
     return results
 
 
-def talent_context(question: str, sources, planner=None, *, max_results: int = 5) -> str | None:
+def talent_context(question: str, sources, planner=None, *, max_results: int = 5, saved_plan: TalentPlan | None = None, offset: int = 0) -> str | None:
     sheets, failures = read_talent_sheets(sources)
     if not sheets:
         return None
-    plan = rule_plan(question, sheets)
+    plan = validate_plan(saved_plan, sheets) if saved_plan else rule_plan(question, sheets)
     # General document Q&A and simple whole-file counts keep the existing route.
     candidate = bool(re.search(r"领域|研究方向|人才|排名|排序|排行|h.?index|筛选|查找|查询|找出|推荐|机构|城市", question, re.I))
     if plan is None and not candidate:
@@ -201,16 +216,33 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
     if plan is None:
         return "人才表已找到，但无法可靠确定本次筛选或排序条件。请明确领域和指标来源，例如：具身智能领域，按 OpenAlex h-index 降序排列前20名。"
     plan = plan.model_copy(update={"limit": min(plan.limit, max_results)})
-    results = execute_plan(plan, sheets)
+    results = execute_plan(plan, sheets, all_records=True)
+    matched = sum(result.get('matched_records', 0) for result in results)
+    rankable = sum(result.get('rankable_records') or 0 for result in results) if plan.sort_by else None
+    missing = sum(result.get('missing_sort_values') or 0 for result in results) if plan.sort_by else None
+    # Missing metrics do not mean missing people. If nobody can be ranked, show
+    # their verified basic information, explicitly without a ranking.
+    unranked = bool(plan.sort_by and matched and not rankable)
+    if unranked:
+        basic = execute_plan(plan.model_copy(update={'sort_by': None}), sheets, all_records=True)
+        for result, fallback in zip(results, basic):
+            if 'error' not in result:
+                result['records'] = fallback.get('records', [])
     candidates = [(index, record) for index, result in enumerate(results) for record in result.get('records', [])]
-    if plan.sort_by:
+    if plan.sort_by and not unranked:
         candidates.sort(key=lambda item: number_value(item[1]['fields'][plan.sort_by]), reverse=plan.descending)
-    selected = {(index, record['excel_row']) for index, record in candidates[:plan.limit]}
+    total = len(candidates)
+    page = candidates[offset:offset + plan.limit]
+    selected = {(index, record['excel_row']) for index, record in page}
     for index, result in enumerate(results):
         if 'error' in result:
             continue
         result['records'] = [record for record in result['records'] if (index, record['excel_row']) in selected]
         result['returned_records'] = len(result['records'])
-        result['truncated'] = result['rankable_records'] > len(result['records'])
-    return json.dumps({"results": results, "unreadable_files": failures, "max_returned_records": plan.limit,
-                       "scope_note": f"全表筛选和统计，所有文件合计最多展示{plan.limit}条人员记录；命中总数不是展示数量。各文件独立统计，不按姓名去重。缺失或非数值指标不参与排名。"}, ensure_ascii=False)
+        result['truncated'] = total > offset + len(page)
+    return json.dumps({'results': results, 'unreadable_files': failures,
+        'max_returned_records': plan.limit, 'plan': plan.model_dump(),
+        'pagination': {'offset': offset, 'page_size': plan.limit, 'returned': len(page),
+                       'total': total, 'has_more': offset + len(page) < total},
+        'matched': matched, 'rankable': rankable, 'missing': missing, 'unranked': unranked,
+        'scope_note': '全表筛选后分页。缺失指标不参与排名；全部缺失时展示基本资料，不做排名。'}, ensure_ascii=False)

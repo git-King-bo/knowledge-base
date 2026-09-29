@@ -1,7 +1,4 @@
 import test from 'node:test'
-import './file-preview.test'
-import './navigation-history.test'
-import './row-evidence.test'
 import assert from 'node:assert/strict'
 import { createApp, h, nextTick, ref } from 'vue'
 import MacDialog from '../src/components/MacDialog.vue'

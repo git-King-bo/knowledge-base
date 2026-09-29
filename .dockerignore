@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/.venv
+**/dist
+**/.env
+**/.env.*
+**/storage
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/__pycache__
+deploy/production.env

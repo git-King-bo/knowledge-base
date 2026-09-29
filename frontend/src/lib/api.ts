@@ -13,7 +13,7 @@ import type {
   WebSource,
 } from './types'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001/api'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
 interface ApiProvider {
   id: string
@@ -22,6 +22,7 @@ interface ApiProvider {
   base_url: string
   api_key_hint: string
   default_model: string
+  enable_thinking?: boolean | null
   is_default: boolean
 }
 
@@ -47,11 +48,14 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
   if (!(options.body instanceof FormData)) {
     headers.set('Content-Type', headers.get('Content-Type') ?? 'application/json')
   }
+  headers.set("X-Requested-With", "knowledge-base")
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include",
     ...options,
     headers,
   })
 
+  if (response.status === 401 && path !== "/auth/login" && path !== "/auth/me") window.dispatchEvent(new Event("kb-session-expired"))
   if (!response.ok) {
     let detail = ''
     try {
@@ -83,6 +87,7 @@ function toProvider(item: ApiProvider): ProviderConfig {
     baseUrl: item.base_url,
     apiKeyHint: item.api_key_hint,
     defaultModel: item.default_model,
+    enableThinking: item.enable_thinking ?? null,
     isDefault: item.is_default,
   }
 }
@@ -125,6 +130,7 @@ interface ApiKnowledgeChunk {
   id: string
   source_id: string
   chunk_index: number
+  citation_index?: number | null
   title: string | null
   content: string
   token_count: number
@@ -189,6 +195,7 @@ function toKnowledgeChunk(item: ApiKnowledgeChunk): KnowledgeChunk {
     id: item.id,
     sourceId: item.source_id,
     chunkIndex: item.chunk_index,
+    citationIndex: item.citation_index ?? undefined,
     title: item.title,
     content: item.content,
     tokenCount: item.token_count,
@@ -236,10 +243,11 @@ export async function fetchProviders() {
 
 export async function createProvider(payload: {
   name: string
-  provider: string
+  provider?: string
   baseUrl: string
   apiKey?: string
   defaultModel: string
+  enableThinking?: boolean | null
 }) {
   const data = await request<ApiProvider>('/ai/providers', {
     method: 'POST',
@@ -249,6 +257,7 @@ export async function createProvider(payload: {
       base_url: payload.baseUrl,
       api_key: payload.apiKey || null,
       default_model: payload.defaultModel,
+      enable_thinking: payload.enableThinking,
     }),
   })
   return toProvider(data)
@@ -387,9 +396,9 @@ export async function fetchKnowledgeBaseSources(knowledgeBaseId: string) {
   return data.map(toKnowledgeSource)
 }
 
-export async function fetchKnowledgeBaseChunks(knowledgeBaseId: string) {
+export async function fetchKnowledgeBaseChunks(knowledgeBaseId: string, offset = 0) {
   const data = await request<ApiKnowledgeChunk[]>(
-    `/knowledge/bases/${encodeURIComponent(knowledgeBaseId)}/chunks`,
+    `/knowledge/bases/${encodeURIComponent(knowledgeBaseId)}/chunks?offset=${offset}&limit=100`,
   )
   return data.map(toKnowledgeChunk)
 }
@@ -440,7 +449,9 @@ export async function askKnowledge(payload: {
   providerId?: string
   model?: string
   topK?: number
+  talentPageSize?: number
   webSearchMode?: WebSearchMode
+  history?: import('./conversation').ConversationContext[]
 }) {
   const data = await request<{
     answer: string
@@ -449,6 +460,7 @@ export async function askKnowledge(payload: {
     sources: ApiKnowledgeChunk[]
     web_sources: ApiWebSource[]
     row_sources?: RowSource[]
+    query_state?: import('./conversation').TalentQueryState
   }>('/knowledge/ask', {
     method: 'POST',
     body: JSON.stringify({
@@ -456,8 +468,10 @@ export async function askKnowledge(payload: {
       knowledge_base_id: payload.knowledgeBaseId,
       provider_id: payload.providerId,
       model: payload.model,
+      talent_page_size: payload.talentPageSize ?? 5,
       top_k: payload.topK ?? 5,
       web_search_mode: payload.webSearchMode ?? 'knowledge',
+      history: payload.history ?? [],
     }),
   })
   return {
@@ -467,6 +481,7 @@ export async function askKnowledge(payload: {
     sources: data.sources.map(toKnowledgeChunk),
     webSources: data.web_sources.map(toWebSource),
     rowSources: data.row_sources || [],
+    queryState: data.query_state,
   }
 }
 
@@ -475,10 +490,10 @@ export async function fetchAIActivityLogs(limit = 100) {
   return data.map(toActivityLog)
 }
 
-export async function updateProvider(id: string, payload: { name: string; provider: string; baseUrl: string; defaultModel: string; apiKey?: string }) {
+export async function updateProvider(id: string, payload: { name: string; provider?: string; baseUrl: string; defaultModel: string; apiKey?: string; enableThinking?: boolean | null }) {
   return toProvider(await request<ApiProvider>(`/ai/providers/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    body: JSON.stringify({ name: payload.name, provider: payload.provider, base_url: payload.baseUrl, default_model: payload.defaultModel, ...(payload.apiKey ? { api_key: payload.apiKey } : {}) }),
+    body: JSON.stringify({ name: payload.name, provider: payload.provider, base_url: payload.baseUrl, default_model: payload.defaultModel, enable_thinking: payload.enableThinking, ...(payload.apiKey ? { api_key: payload.apiKey } : {}) }),
   }))
 }
 
@@ -489,10 +504,12 @@ export interface KnowledgeStreamMeta {
   sources: KnowledgeChunk[]
   webSources: WebSource[]
   rowSources?: RowSource[]
+  retrievalQuery?: string
+  queryState?: import('./conversation').TalentQueryState
 }
 
 export async function streamKnowledge(
-  payload: Parameters<typeof askKnowledge>[0] & { continuation?: { answer: string; sources: KnowledgeChunk[]; webSources: WebSource[] } },
+  payload: Parameters<typeof askKnowledge>[0] & { continuation?: { answer: string; sources: KnowledgeChunk[]; webSources: WebSource[]; retrievalQuery?: string } },
   options: {
     signal?: AbortSignal
     headers?: HeadersInit
@@ -508,13 +525,15 @@ export async function streamKnowledge(
     body: JSON.stringify({
       question: payload.question, knowledge_base_id: payload.knowledgeBaseId,
       provider_id: payload.providerId, model: payload.model,
-      top_k: payload.topK ?? 5, web_search_mode: payload.webSearchMode ?? 'knowledge',
+      talent_page_size: payload.talentPageSize ?? 5, top_k: payload.topK ?? 5, web_search_mode: payload.webSearchMode ?? 'knowledge',
+      history: payload.history ?? [],
       continuation: payload.continuation && {
         answer: payload.continuation.answer,
         sources: payload.continuation.sources.map(source => ({ id: source.id, source_id: source.sourceId,
           chunk_index: source.chunkIndex, title: source.title, content: source.content,
           token_count: source.tokenCount, score: source.score })),
         web_sources: payload.continuation.webSources,
+        retrieval_query: payload.continuation.retrievalQuery,
       },
     }),
   })
@@ -534,6 +553,8 @@ export async function streamKnowledge(
         || (value.row_sources !== undefined && !Array.isArray(value.row_sources))) throw new Error('来源信息格式错误')
       hasMeta = true
       options.onMeta({ providerId: value.provider_id, model: value.model,
+        ...(typeof value.retrieval_query === 'string' ? { retrievalQuery: value.retrieval_query } : {}),
+        ...(value.query_state ? { queryState: value.query_state } : {}),
         ...(value.row_sources ? { rowSources: value.row_sources as RowSource[] } : {}),
         sources: value.sources.map(toKnowledgeChunk), webSources: value.web_sources.map(toWebSource) })
     } else if (event.event === 'delta') {
@@ -551,4 +572,20 @@ export async function streamKnowledge(
     }
   }, options.signal)
   if (!complete) throw new Error('连接提前断开，已接收的内容已保留，请重试。')
+}
+
+
+export async function submitImport(baseId: string, file: File, confirmPreview?: (preview: {talent_records:number;fields:string[];characters:number;duplicate_name_rows:number}) => boolean) {
+  const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()))]
+    .map(value => value.toString(16).padStart(2, '0')).join('')
+  const reused = await request<{reused:boolean;source_id?:string}>(`/imports/${baseId}/reuse`, {
+    method: 'POST', body: JSON.stringify({sha256:hash}),
+  })
+  if (reused.reused) return reused
+  const data = new FormData(); data.append('file', file)
+  if (confirmPreview) {
+    const preview = await request<{talent_records:number;fields:string[];characters:number;duplicate_name_rows:number}>(`/imports/${baseId}/preview`, {method:'POST',body:data})
+    if (!confirmPreview(preview)) throw new Error('已取消导入，未写入数据库')
+  }
+  return request<{reused:boolean;source_id:string}>(`/imports/${baseId}`, {method:'POST',body:data})
 }

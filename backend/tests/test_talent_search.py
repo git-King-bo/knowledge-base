@@ -73,7 +73,7 @@ class TalentSearchTests(unittest.TestCase):
         base = self.base()
         self.roster(base)
         self.roster(self.base('隔离库'))
-        payload = {'question': '具身智能领域按OpenAlex h-index排名', 'knowledge_base_id': base, 'top_k': 1}
+        payload = {'question': '具身智能领域按OpenAlex h-index排名', 'knowledge_base_id': base, 'top_k': 1, 'talent_page_size': 1}
         with patch('app.api.routes.knowledge.KnowledgeIngestionRepository.search_chunks', return_value=[]):
             response = self.client.post('/api/knowledge/ask', json=payload)
             self.assertEqual(response.status_code, 200, response.text)
@@ -83,18 +83,16 @@ class TalentSearchTests(unittest.TestCase):
             self.assertEqual(evidence[0]['excel_row'], 3)
             self.assertEqual(evidence[0]['fields']['OpenAlex h-index'], '100')
             self.assertEqual(evidence[0]['index'], 1)
-            prompt = json.loads(self.requests[-1].content)['messages'][1]['content']
-            self.assertIn('"matched_records": 5', prompt)
-            self.assertEqual(prompt.count('"scanned_records": 6'), 1)
-            self.assertIn('"OpenAlex h-index": "100"', prompt)
+            self.assertIn('其中 3 条有 OpenAlex h-index', response.json()['answer'])
+            self.assertNotIn('rankable_records', response.json()['answer'])
+            self.assertEqual(response.json()['query_state']['returned'], 1)
             with self.fixture('data: {"choices":[{"delta":{"content":"已按指标排序"}}]}\n\ndata: [DONE]\n\n'):
                 response = self.client.post('/api/knowledge/ask/stream', json=payload)
             self.assertIn('event: done', response.text)
             events = [json.loads(block.splitlines()[1][6:]) for block in response.text.strip().split('\n\n')
                       if block.startswith('event: meta')]
             self.assertEqual(events[0]['row_sources'], evidence)
-            prompt = json.loads(self.requests[-1].content)['messages'][1]['content']
-            self.assertIn('"missing_sort_values": 2', prompt)
+            self.assertIn('另有 2 条缺少该指标', response.text)
 
     def test_search_returns_structured_rows_and_zero_matches_is_explicit(self):
         base = self.base()

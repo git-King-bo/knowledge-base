@@ -5,6 +5,7 @@ import { fetchUsage, usageExportUrl, type UsageOverview } from '../lib/usage'
 import { useTask } from '../composables/useTask'
 import { useAnimatedMetrics } from '../composables/useAnimatedMetrics'
 import AppIcon from '../components/AppIcon.vue'
+import FairyIcon from '../components/FairyIcon.vue'
 import AppSelect from '../components/AppSelect.vue'
 import CountUpNumber from '../components/CountUpNumber.vue'
 defineProps<{ providers: ProviderConfig[]; bases: KnowledgeBase[] }>()
@@ -116,7 +117,7 @@ onMounted(() => load())
 </i>总消耗</span>
 </div>
 <div v-if="!data || !summary?.total_tokens" class="empty-state chart-empty">
-<AppIcon name="chart" :size="30" />
+<FairyIcon name="chart" :size="78" portrait />
 <h3>{{ busy ? '正在加载用量…' : '暂无已报告的 Token 消耗' }}</h3>
 <p>完成真实模型调用后，消耗趋势会显示在这里。</p>
 </div>
