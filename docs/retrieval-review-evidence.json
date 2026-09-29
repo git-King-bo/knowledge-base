@@ -1,0 +1,89 @@
+[
+  {
+    "case": "top_3_continues_to_6",
+    "first": {
+      "offset": 0,
+      "page_size": 3,
+      "returned": 3,
+      "total": 35,
+      "has_more": true
+    },
+    "second": {
+      "offset": 3,
+      "page_size": 3,
+      "returned": 3,
+      "total": 35,
+      "has_more": true
+    }
+  },
+  {
+    "case": "page_size_100_capped_by_default_20",
+    "requested": 100,
+    "actual": {
+      "offset": 0,
+      "page_size": 20,
+      "returned": 20,
+      "total": 35,
+      "has_more": true
+    }
+  },
+  {
+    "case": "unknown_domain_accepted",
+    "matched": 0,
+    "plan": {
+      "filters": [
+        {
+          "field": "领域",
+          "op": "contains",
+          "value": "蛋白质"
+        }
+      ],
+      "sort_by": null,
+      "descending": true,
+      "limit": 5
+    }
+  },
+  {
+    "case": "timeout_becomes_clarification",
+    "answer": "人才表已找到，但无法可靠确定本次筛选或排序条件。请明确领域和指标来源，例如：具身智能领域，按 OpenAlex h-index 降序排列前20名。"
+  },
+  {
+    "case": "personnel_count_cannot_plan",
+    "answer": "人才表已找到，但无法可靠确定本次筛选或排序条件。请明确领域和指标来源，例如：具身智能领域，按 OpenAlex h-index 降序排列前20名。"
+  },
+  {
+    "case": "web_mode_bypassed_for_structured",
+    "status": 200,
+    "web_calls": 0,
+    "returned": 5
+  },
+  {
+    "case": "structured_continuation_restarts_answer",
+    "status": 200,
+    "starts_from_beginning": true,
+    "answer_prefix": "领域：AI4S\n\n找到 30 条人才记录。\n\n本次展示第 1—5 条。\n\n| 姓名 | 当前机构 | 当前职务 | 领域"
+  },
+  {
+    "case": "ambiguous_talent_query_blocks_semantic_retrieval",
+    "status": 200,
+    "search_calls": 0,
+    "embedding_calls": 0,
+    "answer": "人才表已找到，但无法可靠确定本次筛选或排序条件。请明确领域和指标来源，例如：具身智能领域，按 OpenAlex h-index 降序排列前20名。"
+  },
+  {
+    "case": "continuation_accepts_other_base_source",
+    "status": 200,
+    "source_count": 1,
+    "old_base_content_in_prompt": true
+  },
+  {
+    "case": "history_without_base_metadata_reaches_rewriter",
+    "roles": [
+      "system",
+      "user",
+      "assistant",
+      "user"
+    ],
+    "old_content_sent": true
+  }
+]

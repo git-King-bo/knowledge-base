@@ -82,6 +82,8 @@ class OpenAICompatibleProvider(AIProvider):
         }
 
         payload.update(self._thinking_parameters(config, payload["model"]))
+        from app.services.agent_trace import trace_note
+        trace_note("发送模型请求", protocol="chat/completions", parameters={k: v for k, v in payload.items() if k != "messages"}, message_count=len(messages))
 
         with self._client(config) as client:
             response = client.post(
@@ -121,6 +123,8 @@ class OpenAICompatibleProvider(AIProvider):
             "max_tokens": settings.model_max_output_tokens,
         }
         payload.update(self._thinking_parameters(config, payload["model"]))
+        from app.services.agent_trace import trace_note
+        trace_note("发送模型请求", protocol="chat/completions", parameters={k: v for k, v in payload.items() if k != "messages"}, message_count=len(messages))
         async with self._async_client(config) as client:
             async with client.stream("POST", "/chat/completions",
                                      headers=self._auth_headers(api_key), json=payload) as response:

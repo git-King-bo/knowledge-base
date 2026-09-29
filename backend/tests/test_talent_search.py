@@ -123,3 +123,93 @@ class TalentSearchTests(unittest.TestCase):
             context = json.loads(talent_context('帮我提取具身智能领域的人才', [],
                 lambda schema: plan.model_dump_json(), max_results=5))
             self.assertEqual(sum(r['returned_records'] for r in context['results']), 5)
+
+    def test_aggregate_counts_full_table_and_routes_semantic_queries(self):
+        sources = self.roster(self.base())
+        for operation in ['distinct_count', 'group_count']:
+            raw = json.dumps({'intent': 'aggregate', 'operation': operation, 'field': '领域'})
+            result = json.loads(talent_context('此知识库包含了多少领域', sources, lambda schema: raw))['aggregate']
+            self.assertEqual(result['distinct'], 2)
+            self.assertEqual(result['records'], 6)
+            self.assertEqual(result['groups'], {'具身智能': 5, '量子计算': 1})
+        self.assertIsNone(talent_context('找与我的项目需求相关的人才', sources,
+            lambda schema: '{"intent":"semantic"}'))
+        self.assertIsNone(talent_context('解释领域定义', sources,
+            lambda schema: '{"intent":"document"}'))
+        self.assertEqual(talent_context('计算人才平均指标', sources,
+            lambda schema: '{"intent":"unsupported","message":"暂不支持平均值统计"}'), '暂不支持平均值统计')
+
+    def test_aggregate_ask_and_stream_return_program_computed_answer(self):
+        base = self.base()
+        self.roster(base)
+        with patch('app.api.routes.knowledge._talent_query_planner',
+                   return_value=lambda schema: '{"intent":"aggregate","operation":"distinct_count","field":"领域"}'):
+            payload = {'question': '此知识库包含了多少领域', 'knowledge_base_id': base}
+            response = self.client.post('/api/knowledge/ask', json=payload)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn('共有 2 个', response.json()['answer'])
+            response = self.client.post('/api/knowledge/ask/stream', json=payload)
+            self.assertIn('共有 2 个', response.text)
+            self.assertIn('event: done', response.text)
+
+    def test_fallback_distinguishes_model_failure_ambiguous_metric_and_invalid_plan(self):
+        from unittest.mock import Mock
+        sources = self.roster(self.base())
+        failed = talent_context('查找甲大学人才', sources, Mock(side_effect=RuntimeError('private provider error')))
+        self.assertIn('模型调用失败', failed)
+        self.assertNotIn('private provider error', failed)
+        ambiguous = talent_context('具身智能按h-index排名', sources, lambda schema: '{}')
+        self.assertIn('Google Scholar h-index', ambiguous)
+        self.assertIn('OpenAlex h-index', ambiguous)
+        unknown = talent_context('推荐适合这个项目的人才', sources, lambda schema: '{}')
+        self.assertIn('推荐适合这个项目的人才', unknown)
+        self.assertIn('不表示知识库没有相关数据', unknown)
+        self.assertNotIn('前20名', unknown)
+
+    def test_aggregate_preserves_filters_and_rejects_incomplete_sources(self):
+        sources = self.roster(self.base())
+        plan = {'intent': 'aggregate', 'operation': 'count',
+                'filters': [{'field': '当前机构', 'value': '甲大学'}]}
+        result = json.loads(talent_context('甲大学多少人才', sources, lambda schema: json.dumps(plan)))
+        self.assertEqual(result['aggregate']['records'], 4)
+        plan.update(operation='distinct_count', field='不存在的字段')
+        self.assertIn('本次未执行查询', talent_context('有多少不同字段值', sources, lambda schema: json.dumps(plan)))
+        sheets, _ = read_talent_sheets(sources)
+        plan.update(field='领域')
+        with patch('app.services.talent_search.read_talent_sheets', return_value=(sheets, ['损坏.xlsx'])):
+            self.assertIn('不能可靠给出全库统计结果', talent_context('有多少领域', sources, lambda schema: json.dumps(plan)))
+
+    def test_planner_contract_shares_runtime_schema_and_aliases(self):
+        from app.services.talent_search import query_planner_instructions, normalized
+        contract = json.loads(query_planner_instructions().split('\n', 1)[1])
+        schema = contract['output_schema']
+        self.assertEqual(schema, TalentPlan.model_json_schema())
+        self.assertEqual(schema['properties']['limit']['maximum'], 100)
+        self.assertEqual(schema['properties']['limit']['default'], 20)
+        self.assertEqual(set(schema['properties']['intent']['enum']),
+                         {'filter', 'aggregate', 'semantic', 'document', 'clarify', 'unsupported'})
+        for alias, canonical in contract['term_aliases'].items():
+            self.assertEqual(normalized(alias + ' h-index'), normalized(canonical + ' h-index'))
+
+    def test_management_metric_sort_is_numeric_before_pagination_and_nulls_last(self):
+        base = self.base()
+        from app.services.talent_import import read_personnel
+        from app.db.models import TalentModel
+        from pathlib import Path
+        sources = self.roster(base)
+        for source in sources:
+            self.db.add_all([TalentModel(**record, created_at=__import__('datetime').datetime(2026, 9, 29)) for record in read_personnel(Path(source.storage_path), source.id)])
+        self.db.commit()
+        def names(order, page=1, size=20):
+            response = self.client.get('/api/talents', params={'knowledge_base_id': base,
+                'sort_by': 'openalex_h_index', 'sort_order': order, 'page': page, 'page_size': size})
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()['items']
+        descending = names('desc')
+        self.assertEqual([row['name'] for row in descending[:4]], ['戊', '乙', '甲', '丁'])
+        self.assertEqual(descending[0]['openalex_h_index'], '200')
+        self.assertEqual([row['name'] for row in names('asc')[:4]], ['丁', '甲', '乙', '戊'])
+        self.assertEqual(names('desc', 2, 1)[0]['name'], '乙')
+        response = self.client.get('/api/talents', params={'knowledge_base_id': base,
+            'organization': '乙大学', 'sort_by': 'openalex_h_index', 'sort_order': 'desc'})
+        self.assertEqual([row['name'] for row in response.json()['items']], ['丁', '丙'])

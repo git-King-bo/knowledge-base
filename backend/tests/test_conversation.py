@@ -184,7 +184,7 @@ class ConversationTests(unittest.TestCase):
         def chat(config, messages, model, key):
             if messages[0].content.startswith('你只负责'):
                 content = json.dumps({'query': query})
-            elif messages[0].content.startswith('将人才查询'):
+            elif messages[0].content.startswith('先识别用户任务'):
                 content = json.dumps({'filters': [
                     {'field': '当前机构', 'op': 'contains', 'value': '清华大学'},
                     {'field': '领域', 'op': 'contains', 'value': '具身智能'},

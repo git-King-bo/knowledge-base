@@ -8,6 +8,7 @@ import MagicEntrance from './components/MagicEntrance.vue'
 import KnowledgeWorkspace from './views/KnowledgeWorkspace.vue'
 import RetrievalWorkspace from './views/RetrievalWorkspace.vue'
 import UsageDashboard from './views/UsageDashboard.vue'
+import AgentMonitor from './views/AgentMonitor.vue'
 import ProviderSettings from './views/ProviderSettings.vue'
 import { useTask } from './composables/useTask'
 import { currentUser, restoreLogin, logout } from './lib/auth'
@@ -23,6 +24,7 @@ const tabs = [
   { id: 'knowledge', label: '知识库', icon: 'book', description: '连接团队知识，让每一份资料都产生价值。' },
   { id: 'retrieval', label: '检索测试', icon: 'search', description: '验证召回结果，让回答有据可依。' },
   { id: 'chat', label: '知识问答', icon: 'chat', description: '基于知识库提问，沿着来源探索答案。' },
+  { id: 'agent-monitor', label: 'Agent 监控', icon: 'workflow', description: '按历史对话追踪每次请求的执行过程与 Token 消耗。' },
   { id: 'usage', label: 'Token 监控', icon: 'chart', description: '看清每一次模型调用，掌握每一份 Token 消耗。' },
   { id: 'talents', label: '人才管理', icon: 'book', description: '查看完整人才信息、筛选并维护资料。' },
   // { id: 'jobs', label: '后台任务', icon: 'chart', description: '查看导入和索引的进度，重试失败任务。' },
@@ -79,10 +81,10 @@ onUnmounted(() => window.removeEventListener('hashchange', readHash))
 </span>
 </a>
       <div class="workspace-switch">
-<span class="workspace-avatar"><AppIcon name="globe" :size="18" /></span>
+<!-- <span class="workspace-avatar"><AppIcon name="globe" :size="18" /></span>
 <div>知识工作空间<small>个人工作空间</small>
 </div>
-<span class="workspace-online" title="个人工作空间">●</span>
+<span class="workspace-online" title="个人工作空间">●</span> -->
 </div>
       <span class="nav-caption">工作空间</span>
       <nav aria-label="主导航">
@@ -117,10 +119,11 @@ onUnmounted(() => window.removeEventListener('hashchange', readHash))
 <FairyIcon name="spark" :size="36" portrait />
 </span>
 </header>
+      <div class="workspace-content">
       <main :class="[{ 'chat-page': activeTab === 'chat' }, `page-${activeTab}`]">
         <div v-if="error" class="notice error" role="alert">无法连接后端：{{ error }} <button @click="load" :disabled="busy">重试</button>
 </div>
-<div v-if="activeTab !== 'chat' && activeTab !== 'knowledge'" class="page-heading">
+<div v-if="!['chat', 'knowledge', 'agent-monitor'].includes(activeTab)" class="page-heading">
 <div>
 <div class="eyebrow">{{ { retrieval: 'DISCOVER THE CONNECTIONS', usage: 'EVERY LITTLE SPARK COUNTS', settings: 'YOUR MAGIC TOOLKIT' }[activeTab] }}</div>
 <h1>{{ current.label }}</h1>
@@ -135,9 +138,11 @@ onUnmounted(() => window.removeEventListener('hashchange', readHash))
         <TalentWorkspace v-if="activeTab === 'talents'" :bases="bases" />
         <JobsWorkspace v-if="activeTab === 'jobs'" />
         <TeamWorkspace v-if="activeTab === 'team'" :bases="bases" @refresh="refreshBases" />
+        <AgentMonitor v-if="activeTab === 'agent-monitor'" />
         <UsageDashboard v-if="activeTab === 'usage' && currentUser?.role === 'admin'" :providers="providers" :bases="bases" />
         <ProviderSettings v-if="activeTab === 'settings' && currentUser?.role === 'admin'" :providers="providers" :refresh="refreshProviders" />
       </main>
+      </div>
     </div>
   </div>
   </template>

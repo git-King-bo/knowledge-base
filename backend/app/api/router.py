@@ -11,3 +11,6 @@ api_router.include_router(usage.router, prefix="/usage", tags=["token-usage"])
 
 from app.api.routes.workspace import router as workspace_router
 api_router.include_router(workspace_router, tags=["workspace"])
+
+from app.api.routes.agent_monitor import router as agent_monitor_router
+api_router.include_router(agent_monitor_router, prefix='/agent-monitor', tags=['agent-monitor'])

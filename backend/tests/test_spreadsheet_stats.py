@@ -12,7 +12,13 @@ from app.services.spreadsheet_stats import summarize_workbook
 
 
 class SpreadsheetStatsTests(unittest.TestCase):
-    setUp = workspace.WorkspaceTests.setUp
+    def setUp(self):
+        workspace.WorkspaceTests.setUp(self)
+        # Exercise the document statistics evidence branch independently of routing.
+        router = patch('app.api.routes.knowledge._talent_query_planner',
+                       return_value=lambda schema: '{"intent":"document"}')
+        router.start()
+        self.addCleanup(router.stop)
     tearDown = workspace.WorkspaceTests.tearDown
     base = workspace.WorkspaceTests.base
     fixture = streaming.StreamingTests.fixture

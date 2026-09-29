@@ -3,11 +3,12 @@ import csv
 import io
 import json
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, delete, or_, update
+from sqlalchemy import select, func, delete, or_, update, case, cast, Float
 from sqlalchemy.orm import Session
 from app.core.security import actor, audit, check_base, check_source, now, require_admin
 from app.db.session import get_db
@@ -95,19 +96,27 @@ def talent_query(db,knowledge_base_id=None,q='',organization='',domain=''):
     if domain:query=query.where(TalentModel.domain.contains(domain,autoescape=True))
     return query
 
+def talent_order(sort_by, sort_order):
+    if sort_by == 'openalex_h_index':
+        text = func.trim(func.replace(TalentModel.openalex_h_index, ',', ''))
+        value = case((text.regexp_match(r'^[0-9]+([.][0-9]+)?$'), cast(text, Float)), else_=None)
+        return [value.is_(None), value.desc() if sort_order == 'desc' else value.asc(), TalentModel.name, TalentModel.id]
+    return [TalentModel.name, TalentModel.id]
+
 @router.get('/talents')
 def talents(knowledge_base_id:str|None=None,q:str=Query('',max_length=100),organization:str=Query('',max_length=100),domain:str=Query('',max_length=100),
-            page:int=Query(1,ge=1),page_size:int=Query(30,ge=1,le=100),db:Session=Depends(get_db)):
+            page:int=Query(1,ge=1),page_size:int=Query(30,ge=1,le=100),
+            sort_by:Literal['name','openalex_h_index']='name',sort_order:Literal['asc','desc']='asc',db:Session=Depends(get_db)):
     query=talent_query(db,knowledge_base_id,q,organization,domain)
     total=db.scalar(select(func.count()).select_from(query.subquery()))
-    rows=db.scalars(query.order_by(TalentModel.name,TalentModel.id).offset((page-1)*page_size).limit(page_size))
-    keys=['id','name','organization','position','domain','location','source_id','sheet_name','source_row']
+    rows=db.scalars(query.order_by(*talent_order(sort_by,sort_order)).offset((page-1)*page_size).limit(page_size))
+    keys=['openalex_h_index','id','name','organization','position','domain','location','source_id','sheet_name','source_row']
     return {'total':total,'page':page,'items':[{k:getattr(t,k) for k in keys} for t in rows]}
 
 @router.get('/talents/export')
-def export_talents(knowledge_base_id:str|None=None,q:str='',organization:str='',domain:str='',db:Session=Depends(get_db)):
+def export_talents(knowledge_base_id:str|None=None,q:str='',organization:str='',domain:str='',sort_by:Literal['name','openalex_h_index']='name',sort_order:Literal['asc','desc']='asc',db:Session=Depends(get_db)):
     output=io.StringIO();writer=csv.writer(output);writer.writerow(FIELDS.values())
-    for talent in db.scalars(talent_query(db,knowledge_base_id,q,organization,domain).order_by(TalentModel.id).limit(20000)):
+    for talent in db.scalars(talent_query(db,knowledge_base_id,q,organization,domain).order_by(*talent_order(sort_by,sort_order)).limit(20000)):
         values=[getattr(talent,k) or '' for k in FIELDS]
         writer.writerow(["'"+v if v.startswith(('=','+','-','@','\t','\r')) else v for v in values])
     audit(db,'talent.export',knowledge_base_id or 'accessible')

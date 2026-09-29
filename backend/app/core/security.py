@@ -213,7 +213,8 @@ async def authorize(request: Request, db: Session = Depends(get_db), user=Depend
         require_admin()
     if path.startswith('/api/usage'):
         require_admin()
-    if write and not inference and user.role == 'viewer' and not path.startswith('/api/conversations'):
+    client_telemetry = request.method == 'PUT' and path.startswith('/api/agent-monitor/') and path.endswith('/client-events')
+    if write and not inference and user.role == 'viewer' and not path.startswith('/api/conversations') and not client_telemetry:
         raise HTTPException(403, '只读账号不能修改资料')
     base_id = request.path_params.get('knowledge_base_id') or request.query_params.get('knowledge_base_id')
     if inference and request.method == 'POST':

@@ -304,6 +304,7 @@ class AIRepository:
         latency_ms: int,
         usage: TokenUsage | None = None,
         knowledge_base_id: str | None = None,
+        record_trace_call: bool = True,
     ) -> AIActivityLog:
         from app.core.security import usage_counter
         counter = usage_counter.get()
@@ -332,6 +333,9 @@ class AIRepository:
                                     **(usage or TokenUsage()).model_dump()))
         self.db.commit()
         self.db.refresh(record)
+        if record_trace_call:
+            from app.services.agent_trace import trace_call
+            trace_call(record, usage or TokenUsage())
         return _log_to_schema(record)
 
     def list_activity_logs(self, limit: int = 100) -> list[AIActivityLog]:
@@ -634,7 +638,10 @@ class KnowledgeIngestionRepository:
         embedding_weight: float | None = None,
         knowledge_base_id: str | None = None,
     ) -> list[KnowledgeChunk]:
-        query_vector = _vectorize(query)
+        from app.services.agent_trace import trace_note, trace_stage
+        with trace_stage('本地词项向量化'):
+            query_vector = _vectorize(query)
+        trace_note('词项向量结果', query=query, terms=query_vector, dimensions=len(query_vector))
         if not query_vector and not query_embedding:
             return []
 
@@ -658,34 +665,45 @@ class KnowledgeIngestionRepository:
         from app.db.models import SourceIndexModel
         stale_sources = select(SourceIndexModel.source_id).where(SourceIndexModel.edited.is_(True), SourceIndexModel.revision != SourceIndexModel.indexed_revision)
         statement = statement.where(~KnowledgeChunkModel.source_id.in_(stale_sources))
-        rows = self.db.execute(statement).all()
+        with trace_stage('读取候选知识片段'):
+            rows = self.db.execute(statement).all()
+        trace_note('召回候选范围', candidate_count=len(rows), knowledge_base_id=knowledge_base_id, constraints='仅活动知识库、当前可访问来源；排除编辑后尚未完成重建的索引')
         dense = {}
         if query_embedding:
             from app.services.retrieval_cache import dense_scores
-            dense = dense_scores(rows, query_embedding, embedding_model, str(self.db.get_bind().url))
+            with trace_stage('稠密向量相似度计算'):
+                dense = dense_scores(rows, query_embedding, embedding_model, str(self.db.get_bind().url))
+            trace_note('稠密向量召回', model=embedding_model, compatible_candidates=len(dense), positive_candidates=sum(score > 0 for score in dense.values()))
+        score_details = {}
         results: list[KnowledgeChunk] = []
-        for record, embedding in rows:
-            vector = json.loads(record.vector_json or "{}")
-            lexical_score = _cosine_similarity(query_vector, {key: int(value) for key, value in vector.items()})
-            embedding_score = 0.0
-            if query_embedding and embedding and (embedding_model is None or embedding.embedding_model == embedding_model):
-                embedding_score = dense.get(record.id, 0.0)
+        with trace_stage('词项相似度与混合打分'):
+            for record, embedding in rows:
+                vector = json.loads(record.vector_json or "{}")
+                lexical_score = _cosine_similarity(query_vector, {key: int(value) for key, value in vector.items()})
+                embedding_score = 0.0
+                if query_embedding and embedding and (embedding_model is None or embedding.embedding_model == embedding_model):
+                    embedding_score = dense.get(record.id, 0.0)
 
-            if lexical_score <= 0 and embedding_score <= 0:
-                continue
+                if lexical_score <= 0 and embedding_score <= 0:
+                    continue
 
-            if query_embedding and embedding_score > 0:
-                total_weight = lexical_weight + embedding_weight
-                if total_weight > 0:
-                    score = (
-                        (lexical_weight / total_weight) * lexical_score
-                        + (embedding_weight / total_weight) * embedding_score
-                    )
+                if query_embedding and embedding_score > 0:
+                    total_weight = lexical_weight + embedding_weight
+                    if total_weight > 0:
+                        score = (
+                            (lexical_weight / total_weight) * lexical_score
+                            + (embedding_weight / total_weight) * embedding_score
+                        )
+                    else:
+                        score = lexical_score
                 else:
                     score = lexical_score
-            else:
-                score = lexical_score
 
-            results.append(_chunk_to_schema(record, score=score))
-        results.sort(key=lambda item: item.score or 0, reverse=True)
-        return results[:top_k]
+                score_details[record.id] = {'chunk_id': record.id, 'source_id': record.source_id, 'lexical_score': lexical_score, 'embedding_score': embedding_score, 'combined_score': score}
+                results.append(_chunk_to_schema(record, score=score))
+        with trace_stage('混合相似度排序与 Top K 截取'):
+            results.sort(key=lambda item: item.score or 0, reverse=True)
+            selected = results[:top_k]
+        trace_note('召回与排序结果', positive_candidates=len(results), top_k=top_k, returned=len(selected), lexical_weight=lexical_weight, embedding_weight=embedding_weight, algorithm='词频余弦相似度；稠密分数大于零时按归一化权重融合，否则使用词项分数；按融合分数降序', scores=[score_details[item.id] for item in selected])
+        trace_note('独立精排模型', status='skipped', reason='当前实现没有 Cross-Encoder 或 LLM 精排；直接使用混合相似度排序结果')
+        return selected

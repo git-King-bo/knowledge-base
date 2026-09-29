@@ -36,8 +36,12 @@ test('followups send conversation history, changing bases preserves it, clear re
   }
   try {
     app.mount(host); await settle()
+    const count = host.querySelector<HTMLInputElement>('.qa-range-field input[type="range"]')!
+    count.value = '8'; count.dispatchEvent(new Event('input', { bubbles: true })); await nextTick()
     await submit('第一个方案是什么？')
     assert.deepEqual(requests[0].history, [])
+    assert.equal(requests[0].top_k, 8)
+    assert.equal(requests[0].talent_page_size, 8)
     await submit('它有什么缺点？')
     assert.deepEqual(requests[1].history, [{ question: '第一个方案是什么？', answer: '回答1' }])
     baseId.value = 'two'; baseRequest.value++; await settle()

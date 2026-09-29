@@ -101,6 +101,9 @@ class ConversationTurn(BaseModel):
 
 
 class AskRequest(BaseModel):
+    client_started_at: str | None = Field(default=None, max_length=40)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=80)
+    turn_id: str | None = Field(default=None, min_length=1, max_length=80)
     question: str = Field(min_length=1, max_length=5000)
     knowledge_base_id: str | None = None
     provider_id: str | None = None

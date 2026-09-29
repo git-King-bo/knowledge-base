@@ -39,7 +39,7 @@ class TalentConversationTests(unittest.TestCase):
             if '取消排序' not in current:
                 query += '，按OpenAlex h-index降序'
             result = {'query': query}
-        elif prompt.startswith('将人才查询'):
+        elif prompt.startswith('先识别用户任务'):
             query = json.loads(messages[-1].content)['question']
             filters = [{'field': '当前机构', 'op': 'contains', 'value': '清华大学'}]
             if '具身智能' in query:

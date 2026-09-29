@@ -7,6 +7,7 @@ from app.repositories.sqlite import AIRepository
 from app.schemas.usage import TokenUsage
 
 import httpx
+import json
 
 from app.core.config import settings
 from app.core.security import validate_provider_url
@@ -51,16 +52,19 @@ class EmbeddingClient:
         try:
             vectors, usage = self._embed_texts(texts)
         except Exception:
-            self._record_usage(usage, False, started, len(texts))
+            self._record_usage(usage, False, started, texts)
             raise
-        self._record_usage(usage, True, started, len(texts))
+        self._record_usage(usage, True, started, texts, vectors)
         return vectors
 
-    def _record_usage(self, usage: TokenUsage, success: bool, started: float, count: int):
+    def _record_usage(self, usage: TokenUsage, success: bool, started: float, texts: list[str], vectors=None):
+        from app.services.agent_trace import current_trace
+        traced = current_trace.get() is not None
         if self.db is not None:
             AIRepository(self.db).create_activity_log(
                 action="embedding", provider_id="embedding", model=self.config.model,
-                request_text=f"Embedding batch: {count} texts", response_text="",
+                request_text=json.dumps({"model": self.config.model, "input": texts}, ensure_ascii=False) if traced else f"Embedding batch: {len(texts)} texts",
+                response_text=json.dumps({"vectors": vectors}, ensure_ascii=False) if traced and vectors is not None else "",
                 success=success, latency_ms=int((perf_counter() - started) * 1000),
                 usage=usage, knowledge_base_id=self.knowledge_base_id,
             )

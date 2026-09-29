@@ -24,6 +24,9 @@ def init_db() -> None:
         command.upgrade(config, 'head')
     else:
         Base.metadata.create_all(bind=engine)
+        from app.db.trace_schema import upgrade_trace_counters
+        with engine.begin() as connection:
+            upgrade_trace_counters(connection)
         # create_all does not add columns to an existing local database.
         from sqlalchemy import inspect, text
         if 'enable_thinking' not in {c['name'] for c in inspect(engine).get_columns('ai_providers')}:

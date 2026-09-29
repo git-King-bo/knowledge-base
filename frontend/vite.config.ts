@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-const devPort = Number(process.env.VITE_PORT ?? 5174)
+const devPort = Number(process.env.VITE_PORT ?? 5177)
 
 
 // https://vite.dev/config/

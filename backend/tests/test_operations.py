@@ -45,7 +45,7 @@ class OperationsTests(unittest.TestCase):
             with patch.object(settings,'app_env','production'),patch.object(settings,'database_url',url),patch('app.db.init_db.engine',engine):
                 init_db()
             with engine.connect() as conn:
-                self.assertEqual(conn.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0005_provider_thinking')
+                self.assertEqual(conn.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0006_agent_traces')
             engine.dispose()
             other=create_engine('sqlite:///'+str(Path(folder)/'legacy.db'))
             with other.begin() as conn:conn.execute(text('CREATE TABLE legacy(id INTEGER)'))

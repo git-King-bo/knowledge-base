@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Agent-Trace-ID", "X-Request-ID"],
     )
 
     from app.api.routes.auth import router as auth_router

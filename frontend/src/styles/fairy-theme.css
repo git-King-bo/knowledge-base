@@ -102,7 +102,7 @@ h1 { font-size: 28px; letter-spacing: .5px; font-weight: 650; }
 .sidebar { background: linear-gradient(165deg, #fbf7f2ec, #edf5f3ed 66%, #e7eef2e8); border-right: 1px solid #ffffffc9; padding: 30px 18px 18px; box-shadow: 4px 0 35px #657f8605; }
 .brand { gap: 12px; padding: 0 8px; font-size: 24px; letter-spacing: 3px; font-weight: 650; color: #526a75; }
 .brand-en { color: #88979e; font-size: 6px; margin-top: 5px; letter-spacing: 1px; }
-.workspace-switch { margin: 30px 0 28px; padding: 12px 10px; border-radius: 16px; background: #ffffff80; border: 1px solid #fff; box-shadow: 0 3px 12px #60798306; color: #687e88; }
+.workspace-switch { margin: 30px 0 28px; border-radius: 16px; background: #ffffff80; border: 1px solid #fff; box-shadow: 0 3px 12px #60798306; color: #687e88; }
 .workspace-switch small { color: #84959c; }
 .workspace-avatar { background: #e8eff0; color: #7e9ca9; border-radius: 10px; width: 31px; height: 31px; }
 .workspace-online { color: #83a598; font-size: 8px; }

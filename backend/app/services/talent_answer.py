@@ -70,7 +70,25 @@ def render_talent_answer(evidence, row_sources):
     return '\n\n'.join(parts)
 
 
+def render_aggregate_answer(evidence):
+    stats = evidence['aggregate']
+    if stats['operation'] == 'count':
+        answer = f"符合本次条件的人才记录共 {stats['records']} 条。"
+    else:
+        answer = f"符合本次条件的记录中，{cell(stats['field'])}共有 {stats['distinct']} 个不同的非空字段值。"
+        answer += '\n\n| 字段值 | 记录数 |\n| --- | --- |\n'
+        answer += '\n'.join(f"| {cell(value)} | {count} |" for value, count in stats['groups'].items())
+        answer += f"\n\n另有 {stats['empty']} 条记录的该字段为空。"
+    answer += '\n\n统计口径：' + stats['basis']
+    answer += '\n\n统计来源：' + '；'.join(f"{cell(item['file'])} / {cell(item['sheet'])}（扫描 {item['scanned_records']} 条）" for item in stats['sources'])
+    return answer
+
+
 def prepare_response(payload, provider, query, evidence, rows):
+    if 'aggregate' in evidence:
+        answer = render_aggregate_answer(evidence)
+        return AskResponse(answer=answer, provider_id=provider.id, model=payload.model or provider.default_model,
+                           sources=[], row_sources=[], retrieval_query=query)
     page = evidence['pagination']
     return AskResponse(answer=render_talent_answer(evidence, rows), provider_id=provider.id,
         model=payload.model or provider.default_model, sources=[], row_sources=rows, retrieval_query=query,

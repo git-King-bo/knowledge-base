@@ -1,4 +1,5 @@
 """Bounded conversation context used by both synchronous and streaming RAG."""
+from app.services.agent_trace import traced, trace_note
 import json
 import re
 from time import perf_counter
@@ -36,18 +37,21 @@ def history_messages(history):
     )]
 
 
+@traced('理解追问与查询改写')
 def resolve_retrieval_query(payload, history, provider, api_key, db):
     if payload.continuation and payload.continuation.retrieval_query:
         return payload.continuation.retrieval_query
     if re.fullmatch(r'\s*(继续|下一页|继续查看|继续列出|查看更多|接着列|后面的|还有呢)[。！!？?\s]*', payload.question):
         raise RetrievalClarification('请确认要继续查看哪一批结果？旧会话没有分页记录，请重新输入机构或领域条件，我会从第一页开始。', provider.id, payload.model or provider.default_model)
     if not history:
+        trace_note('查询改写模型', status='skipped', reason='没有历史追问，直接使用用户原始问题')
         return payload.question
     # The fallback retains conversational terms rather than dropping all memory.
     previous = history[-1]
     fallback = f"{previous.question[:1500]}\n{previous.answer[:1500]}\n当前问题：{payload.question}"
     fallback = fallback[-5000:]
     if provider.provider == "mock":
+        trace_note('查询改写降级', status='fallback', query=fallback, reason='模拟模式或改写结果不可用，保留上下文拼接检索')
         return fallback
     instructions = (
         "你只负责将当前追问改写为独立、可检索的问题，不回答问题。"
@@ -90,6 +94,7 @@ def resolve_retrieval_query(payload, history, provider, api_key, db):
         query = parsed.get("query") if isinstance(parsed, dict) else None
         if not isinstance(query, str) or not query.strip() or len(query) > 5000:
             raise ValueError("Invalid conversation retrieval query")
+        trace_note('查询改写结果', original=payload.question, rewritten=query.strip())
         return query.strip()
     except RetrievalClarification:
         raise
@@ -97,6 +102,7 @@ def resolve_retrieval_query(payload, history, provider, api_key, db):
         failure = str(exc)
         if re.search(r'排序|排名|最高|最低|h[ -]?index', payload.question, re.I):
             raise RetrievalClarification('你希望保留前面的机构、领域条件，在完整人才表中重新排序，还是只比较上一轮列出的人选？也请确认指标来源是 OpenAlex 还是 Google Scholar。', provider.id, payload.model or provider.default_model)
+        trace_note('查询改写降级', status='fallback', query=fallback, reason='模拟模式或改写结果不可用，保留上下文拼接检索')
         return fallback
     finally:
         AIRepository(db).create_activity_log(

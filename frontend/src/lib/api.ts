@@ -444,6 +444,8 @@ export async function searchKnowledge(query: string, topK = 5, knowledgeBaseId?:
 }
 
 export async function askKnowledge(payload: {
+  conversationId?: string
+  turnId?: string
   question: string
   knowledgeBaseId?: string
   providerId?: string
@@ -472,6 +474,7 @@ export async function askKnowledge(payload: {
       top_k: payload.topK ?? 5,
       web_search_mode: payload.webSearchMode ?? 'knowledge',
       history: payload.history ?? [],
+      conversation_id: payload.conversationId, turn_id: payload.turnId,
     }),
   })
   return {
@@ -508,6 +511,8 @@ export interface KnowledgeStreamMeta {
   queryState?: import('./conversation').TalentQueryState
 }
 
+export interface ClientTrace { id: string; startedAt: number; events: { name: string; elapsed_ms: number }[] }
+
 export async function streamKnowledge(
   payload: Parameters<typeof askKnowledge>[0] & { continuation?: { answer: string; sources: KnowledgeChunk[]; webSources: WebSource[]; retrievalQuery?: string } },
   options: {
@@ -515,18 +520,23 @@ export async function streamKnowledge(
     headers?: HeadersInit
     onMeta: (meta: KnowledgeStreamMeta) => void
     onDelta: (text: string) => void
+    onTrace?: (trace: ClientTrace) => void
   },
 ) {
+  const startedAt = performance.now()
+  const events: ClientTrace['events'] = [{ name: '页面发起请求', elapsed_ms: 0 }]
   const headers = new Headers(options.headers)
   headers.set('Accept', 'text/event-stream')
   headers.set('Content-Type', 'application/json')
   const response = await apiFetch('/knowledge/ask/stream', {
     method: 'POST', headers, signal: options.signal,
     body: JSON.stringify({
+      client_started_at: new Date().toISOString(),
       question: payload.question, knowledge_base_id: payload.knowledgeBaseId,
       provider_id: payload.providerId, model: payload.model,
       talent_page_size: payload.talentPageSize ?? 5, top_k: payload.topK ?? 5, web_search_mode: payload.webSearchMode ?? 'knowledge',
       history: payload.history ?? [],
+      conversation_id: payload.conversationId, turn_id: payload.turnId,
       continuation: payload.continuation && {
         answer: payload.continuation.answer,
         sources: payload.continuation.sources.map(source => ({ id: source.id, source_id: source.sourceId,
@@ -537,6 +547,9 @@ export async function streamKnowledge(
       },
     }),
   })
+  events.push({ name: '收到响应头', elapsed_ms: Math.round(performance.now() - startedAt) })
+  const traceId = response.headers.get('X-Agent-Trace-ID')
+  if (traceId) options.onTrace?.({ id: traceId, startedAt, events })
   if (!response.body || !response.headers.get('Content-Type')?.includes('text/event-stream')) {
     throw new Error('服务器未返回有效的流式响应')
   }
@@ -559,6 +572,7 @@ export async function streamKnowledge(
         sources: value.sources.map(toKnowledgeChunk), webSources: value.web_sources.map(toWebSource) })
     } else if (event.event === 'delta') {
       if (!hasMeta || typeof value.text !== 'string') throw new Error('流式文本格式错误')
+      if (!receivedText && value.text.length) events.push({ name: '收到首段文本', elapsed_ms: Math.round(performance.now() - startedAt) })
       receivedText ||= value.text.length > 0
       length += value.text.length
       if (length > 400_000) throw new Error('回答内容超过显示上限')
@@ -568,6 +582,7 @@ export async function streamKnowledge(
     } else if (event.event === 'done') {
       if (!hasMeta || !receivedText) throw new Error('服务器未返回回答内容')
       complete = true
+      events.push({ name: '流式响应读取完成', elapsed_ms: Math.round(performance.now() - startedAt) })
       return false
     }
   }, options.signal)

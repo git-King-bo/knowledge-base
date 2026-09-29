@@ -21,7 +21,6 @@ const providerId = ref('')
 const model = ref('')
 const question = ref('')
 const topK = ref(5)
-const talentPageSize = ref(5)
 const webMode = ref<WebSearchMode>('knowledge')
 const sources = ref<KnowledgeSource[]>([])
 const hits = ref<KnowledgeChunk[]>([])
@@ -207,6 +206,7 @@ function useSuggestion(value: string) {
 }
 const sourceName = (id: string) => sources.value.find(source => source.id === id)?.filename || id
 async function generateTurn(turn: ChatTurn, continuing = false) {
+      let clientTrace: import('../lib/api').ClientTrace | undefined
       const previousAnswer = turn.answer
       turn.status = 'waiting'
       followOutput.value = true
@@ -227,10 +227,12 @@ async function generateTurn(turn: ChatTurn, continuing = false) {
       streamBuffer = buffer
       try {
         await streamKnowledge({ ...turn.request,
+          conversationId: conversationId.value, turnId: String(turn.id),
           continuation: continuing && previousAnswer
             ? { answer: previousAnswer, sources: turn.sources, webSources: turn.webSources, retrievalQuery: turn.retrievalQuery } : undefined,
         }, {
           signal: controller.signal,
+          onTrace(trace) { clientTrace = trace },
           onMeta(meta) { turn.request.providerId = meta.providerId; turn.request.model = meta.model; Object.assign(turn, { sources: meta.sources, webSources: meta.webSources, rowSources: meta.rowSources || [], model: meta.model, retrievalQuery: meta.retrievalQuery, query_state: meta.queryState }) },
           onDelta(text) { buffer.append(text) },
         })
@@ -240,6 +242,11 @@ async function generateTurn(turn: ChatTurn, continuing = false) {
         if (!controller.signal.aborted) throw cause
       } finally {
         await buffer.finish()
+        await nextTick()
+        if (clientTrace) {
+          clientTrace.events.push({ name: turn.status === 'done' ? '页面渲染完成' : turn.status === 'stopped' ? '页面输出停止' : '页面输出失败', elapsed_ms: Math.round(performance.now() - clientTrace.startedAt) })
+          void request('/agent-monitor/' + encodeURIComponent(clientTrace.id) + '/client-events', { method: 'PUT', body: JSON.stringify({ events: clientTrace.events }) }).catch(() => { /* Telemetry must not interrupt the answer. */ })
+        }
         await saveChat()
         if (streamController === controller) { streamController = undefined; streamBuffer = undefined }
       }
@@ -271,7 +278,7 @@ function submit() {
         sources: [], webSources: [], rowSources: [], model: model.value, status: 'waiting',
         request: { question: value, knowledgeBaseId: baseId.value, providerId: providerId.value,
           history: buildConversationHistory(messages.value),
-          model: model.value || undefined, topK: topK.value, talentPageSize: talentPageSize.value, webSearchMode: webMode.value } })
+          model: model.value || undefined, topK: topK.value, talentPageSize: topK.value, webSearchMode: webMode.value } })
       messages.value.push(turn)
       question.value = ''
       await generateTurn(turn)
@@ -342,8 +349,8 @@ function submit() {
         </section>
         <section class="qa-setting-group">
           <h3><AppIcon name="search" :size="16" />检索配置<span>03</span></h3>
-          <label class="qa-range-field"><span>召回数量<output>Top {{ topK }}</output></span><input v-model.number="topK" type="range" min="1" max="12" :disabled="busy" /><span class="range-labels"><span>1 条</span><span>12 条</span></span></label>
-          <label>人才每页条数<select v-model.number="talentPageSize" :disabled="busy"><option :value="5">5 条</option><option :value="10">10 条</option><option :value="20">20 条</option></select></label><p class="qa-field-note">召回数量用于文档检索；人才名单独立分页。</p>
+          <label class="qa-range-field"><span>返回数量<output>最多 {{ topK }} 条</output></span><input v-model.number="topK" type="range" min="1" max="12" :disabled="busy" /><span class="range-labels"><span>1 条</span><span>12 条</span></span></label>
+          <p class="qa-field-note">新查询生效：人才名单控制每页条数，文档问答控制参考片段数；不足时按实际数量返回。</p>
           <label>资料范围<AppSelect v-model="webMode" label="资料范围" :disabled="busy" :options="[{ value: 'knowledge', label: '仅知识库' }, { value: 'auto', label: '按需补充联网搜索' }, { value: 'web', label: '知识库 + 联网搜索' }]" /></label>
           <p v-if="webMode !== 'knowledge'" class="qa-field-note">联网搜索需配置搜索服务；未返回网页时仅使用知识库资料。</p>
         </section>

@@ -12,6 +12,8 @@ def dense_scores(rows,query,model,database_key):
     with _lock:
         cached=_cache.get(signature)
         if cached is not None:_cache.move_to_end(signature)
+    from app.services.agent_trace import trace_note
+    trace_note('向量矩阵缓存', hit=cached is not None, model=model, dimensions=len(query), reason='缓存索引矩阵，不缓存本次模型回答')
     if cached is None:
         ids=[];vectors=[]
         for record,embedding in rows:

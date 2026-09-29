@@ -319,3 +319,29 @@ class TrashModel(Base):
     base_id: Mapped[str] = mapped_column(ForeignKey("knowledge_bases.id", ondelete="CASCADE"), primary_key=True)
     deleted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     previous_status: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+class AgentTraceModel(Base):
+    __tablename__ = 'agent_traces'
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    turn_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    knowledge_base_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text, default='')
+    status: Mapped[str] = mapped_column(String(20), default='running', index=True)
+    error: Mapped[str] = mapped_column(Text, default='')
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    first_token_ms: Mapped[int | None] = mapped_column(Integer)
+    request_json: Mapped[str] = mapped_column(Text, default='{}')
+    stages_json: Mapped[str] = mapped_column(Text, default='[]')
+    calls_json: Mapped[str] = mapped_column(Text, default='[]')
+    call_count: Mapped[int] = mapped_column(Integer, default=0)
+    unknown_calls: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int | None] = mapped_column(Integer, default=0)
