@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, delete, or_, update, case, cast, Float
+from sqlalchemy import select, func, delete, or_, update, case, cast, Numeric
 from sqlalchemy.orm import Session
 from app.core.security import actor, audit, check_base, check_source, now, require_admin
 from app.db.session import get_db
@@ -99,7 +99,8 @@ def talent_query(db,knowledge_base_id=None,q='',organization='',domain=''):
 def talent_order(sort_by, sort_order):
     if sort_by == 'openalex_h_index':
         text = func.trim(func.replace(TalentModel.openalex_h_index, ',', ''))
-        value = case((text.regexp_match(r'^[0-9]+([.][0-9]+)?$'), cast(text, Float)), else_=None)
+        # MySQL 5.7 不支持 CAST AS FLOAT；DECIMAL 同时适用于 SQLite 和 MySQL。
+        value = case((text.regexp_match(r'^[0-9]+([.][0-9]+)?$'), cast(text, Numeric(30, 8))), else_=None)
         return [value.is_(None), value.desc() if sort_order == 'desc' else value.asc(), TalentModel.name, TalentModel.id]
     return [TalentModel.name, TalentModel.id]
 
@@ -276,12 +277,14 @@ def operations(db:Session=Depends(get_db)):
     from app.core.observability import counts
     from app.db.models import RequestBudgetModel
     require_admin()
-    return {'http':dict(counts),'jobs':dict(db.execute(select(ImportJobModel.status,func.count()).group_by(ImportJobModel.status)).all()),
+    return {'database':db.get_bind().dialect.name,'http':dict(counts),'jobs':dict(db.execute(select(ImportJobModel.status,func.count()).group_by(ImportJobModel.status)).all()),
             'budgets':[{'user_id':x.user_id,'day':x.day,'requests':x.requests,'tokens':x.tokens,'reserved':x.reserved} for x in db.scalars(select(RequestBudgetModel).where(RequestBudgetModel.day==now().date().isoformat()))]}
 
 @router.post('/operations/backup')
 def create_backup(db:Session=Depends(get_db)):
     require_admin()
+    if db.get_bind().dialect.name != 'sqlite':
+        raise HTTPException(409, '当前使用 MySQL：请使用数据库备份工具，并单独备份上传目录和加密密钥；此入口仅支持 SQLite。')
     from scripts.backup_workspace import backup
     database=Path(db.get_bind().url.database).resolve()
     name=now().strftime('workspace-%Y%m%dT%H%M%S.tar.gz')

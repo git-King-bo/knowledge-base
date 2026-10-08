@@ -115,6 +115,41 @@ backend/tests/             # 隔离数据库的流程与统计回归测试
 
 默认数据库为 `backend/knowledge_base.db`。启动会增量创建缺失表，不回填历史用量、不删除旧数据。
 
+支持 MySQL 5.7+，安装后端依赖后，在 `backend/.env`（Docker 使用 `deploy/production.env`）填写
+`XINIU_MYSQL_HOST`、`XINIU_MYSQL_PORT`、`XINIU_MYSQL_DATABASE`、`XINIU_MYSQL_USER`、`XINIU_MYSQL_PASSWORD`。
+密码仅放在环境配置中，不提交代码仓库，不放在 Vercel 前端变量中。
+
+- `APP_DATABASE_MODE=auto`（默认）：启动时探测 MySQL，连接或认证失败则使用 SQLite；未配置 MySQL 时直接使用 SQLite。
+- `APP_DATABASE_MODE=mysql`：强制 MySQL，失败拒绝启动；适用于运维迁移和不允许切库的正式部署。
+- `APP_DATABASE_MODE=sqlite`：强制 SQLite，适用于本地测试。
+- SQLite 地址优先使用 SQLite 类型的 `DATABASE_URL`，否则读取 `APP_SQLITE_FALLBACK_URL`。
+  本机默认 `sqlite:///./knowledge_base.db`；Docker 中设为 `sqlite:////data/knowledge_base.db`。
+- 选择仅发生在进程启动时。运行中断线不会切换到另一套数据库；再次启动会重新选择。
+  两套数据库的数据、账号和会话互不自动同步，本地旧数据不会自动导入 MySQL。
+  迁移、表结构及业务 SQL 错误不会被当作连接失败吞掉。
+- MySQL 模式仍需持久化上传目录和加密主密钥，SQLite 回退文件也必须位于持久卷。
+  当前仍按单实例、单导入 worker 运行，换成 MySQL 不代表已经支持多副本。
+
+```bash
+# 在 backend 目录执行，只检查连接和结构，不启动应用或创建表
+.venv/bin/python scripts/check_database.py
+
+# 已有兼容 MySQL 表但没有本项目迁移版本时，先停写，再执行接管
+# 自动备份本项目现有表到 storage/backups/*.sql.gz，补齐缺失表并扩容长文本
+# 遇到字段或主键不匹配会停止；不删除已有记录，不修改无关表，不导入 SQLite
+APP_DATABASE_MODE=mysql .venv/bin/python scripts/prepare_mysql.py
+
+# 强制隔离到 SQLite 运行回归测试，避免本地 MySQL 配置影响测试
+APP_DATABASE_MODE=sqlite .venv/bin/python -m unittest discover -s tests -v
+```
+
+管理员 `/api/operations` 的 `database` 字段可查看当前库类型（不返回凭据）。
+MySQL 的备份请使用数据库备份工具，另外备份上传文件和主密钥；页面备份入口、
+`backup_workspace.py` 和 `maintenance.py` 原有流程只支持 SQLite，MySQL 下不能直接使用。
+`prepare_mysql.py` 的 SQL 快照是结构调整前的保护措施，恢复到独立空库时可用
+`gzip -dc 备份.sql.gz | mysql --host=地址 --port=端口 --user=用户名 --password 新库名`，
+交互输入密码。它不包含原始上传文件、加密主密钥，也不替代定期完整备份。
+
 全新数据库可使用 `alembic upgrade head`。如果已有数据库由旧版应用自动创建且从未使用 Alembic，应先备份并确认与 `0001_initial` 的四张旧表一致，再执行 `alembic stamp 0001_initial` 和 `alembic upgrade head`。不要直接对已有未标记数据库执行首个建表迁移。
 
 ```bash

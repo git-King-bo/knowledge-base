@@ -1,6 +1,7 @@
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +37,15 @@ class Settings(BaseSettings):
         alias="APP_CORS_ORIGINS",
     )
     database_url: str = Field(default="sqlite:///./knowledge_base.db", alias="DATABASE_URL")
+    # auto：启动时优先尝试 MySQL，连接失败则固定使用 SQLite，运行中不切库。
+    database_mode: Literal['auto', 'mysql', 'sqlite'] = Field(default='auto', alias='APP_DATABASE_MODE')
+    sqlite_fallback_url: str = Field(default='sqlite:///./knowledge_base.db', alias='APP_SQLITE_FALLBACK_URL')
+    mysql_host: str = Field(default='', alias='XINIU_MYSQL_HOST')
+    mysql_port: int = Field(default=3306, ge=1, le=65535, alias='XINIU_MYSQL_PORT')
+    mysql_database: str = Field(default='', alias='XINIU_MYSQL_DATABASE')
+    mysql_user: str = Field(default='', alias='XINIU_MYSQL_USER')
+    mysql_password: SecretStr = Field(default=SecretStr(''), alias='XINIU_MYSQL_PASSWORD')
+    mysql_connect_timeout: int = Field(default=5, ge=1, le=30, alias='APP_MYSQL_CONNECT_TIMEOUT')
     upload_dir: str = Field(default="storage/uploads", alias="APP_UPLOAD_DIR")
     knowledge_chunk_max_chars: int = Field(default=480, alias="APP_KB_CHUNK_MAX_CHARS")
     knowledge_chunk_overlap_chars: int = Field(default=80, alias="APP_KB_CHUNK_OVERLAP_CHARS")

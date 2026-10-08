@@ -11,6 +11,8 @@ from app.db.models import AIActivityLogModel,TokenUsageModel,LoginSessionModel,A
 from backup_workspace import backup
 
 if __name__=='__main__':
+    if engine.dialect.name != 'sqlite':
+        raise RuntimeError('SQLite maintenance cannot back up MySQL. Configure MySQL backups separately.')
     database=Path(engine.url.database).resolve(strict=True)
     path=database.parent/'storage/backups'/now().strftime('scheduled-%Y%m%dT%H%M%S.tar.gz')
     backup(database,path)

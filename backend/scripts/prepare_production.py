@@ -18,6 +18,8 @@ from app.services.talent_import import read_personnel
 from backup_workspace import backup
 
 def main():
+    if engine.dialect.name != 'sqlite':
+        raise RuntimeError('This script is SQLite-only. Use scripts/prepare_mysql.py for MySQL.')
     database=Path(engine.url.database).resolve(strict=True)
     path=database.parent/'storage/backups'/datetime.now(timezone.utc).strftime('before-production-%Y%m%dT%H%M%S.tar.gz')
     print('backup:',backup(database,path))

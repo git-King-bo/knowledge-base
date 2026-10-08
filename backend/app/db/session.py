@@ -1,6 +1,5 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -10,8 +9,9 @@ class Base(DeclarativeBase):
     pass
 
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args)
+from app.db.connection import select_engine
+
+engine = select_engine(settings)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -22,17 +22,7 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
-# SQLite is used by the single-server deployment. Constraints apply on every connection.
 from sqlalchemy import event
-
-@event.listens_for(engine, 'connect')
-def sqlite_options(connection, record):
-    if engine.dialect.name == 'sqlite':
-        cursor = connection.cursor()
-        cursor.execute('PRAGMA foreign_keys=ON')
-        cursor.execute('PRAGMA busy_timeout=10000')
-        cursor.execute('PRAGMA journal_mode=WAL')
-        cursor.close()
 
 @event.listens_for(Session, 'do_orm_execute')
 def scope_workspace(execute_state):

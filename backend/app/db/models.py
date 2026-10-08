@@ -1,9 +1,14 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from sqlalchemy.dialects.mysql import LONGTEXT
+
 from app.db.session import Base
+
+# SQLite 保持 TEXT；MySQL 使用 LONGTEXT，避免资料和历史对话超过 64KB。
+DocumentText = Text().with_variant(LONGTEXT(), "mysql")
 
 
 class CategoryModel(Base):
@@ -19,9 +24,9 @@ class DocumentModel(Base):
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     summary: Mapped[str] = mapped_column(String(500), nullable=False, default="")
-    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    content: Mapped[str] = mapped_column(DocumentText, nullable=False, default="")
     category_id: Mapped[str] = mapped_column(ForeignKey("categories.id"), nullable=False)
-    tags: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tags: Mapped[str] = mapped_column(DocumentText, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     updated_at: Mapped[date] = mapped_column(Date, nullable=False)
 
@@ -35,7 +40,7 @@ class AIProviderModel(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     provider: Mapped[str] = mapped_column(String(40), nullable=False)
     base_url: Mapped[str] = mapped_column(String(300), nullable=False)
-    api_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    api_key_encrypted: Mapped[str] = mapped_column(DocumentText, nullable=False, default="")
     api_key_hint: Mapped[str] = mapped_column(String(40), nullable=False, default="未填写")
     default_model: Mapped[str] = mapped_column(String(120), nullable=False)
     enable_thinking: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -68,9 +73,9 @@ class KnowledgeSourceModel(Base):
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(120), nullable=False, default="application/octet-stream")
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    content_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    content_text: Mapped[str] = mapped_column(DocumentText, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="uploaded")
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(DocumentText, nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -86,8 +91,8 @@ class KnowledgeBaseModel(Base):
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    tags: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    description: Mapped[str] = mapped_column(DocumentText, nullable=False, default="")
+    tags: Mapped[str] = mapped_column(DocumentText, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -117,8 +122,8 @@ class KnowledgeChunkModel(Base):
     source_id: Mapped[str] = mapped_column(ForeignKey("knowledge_sources.id"), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    vector_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    content: Mapped[str] = mapped_column(DocumentText, nullable=False)
+    vector_json: Mapped[str] = mapped_column(DocumentText, nullable=False, default="{}")
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
@@ -135,7 +140,7 @@ class KnowledgeChunkEmbeddingModel(Base):
 
     chunk_id: Mapped[str] = mapped_column(ForeignKey("knowledge_chunks.id"), primary_key=True)
     embedding_model: Mapped[str] = mapped_column(String(120), nullable=False)
-    embedding_json: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding_json: Mapped[str] = mapped_column(DocumentText, nullable=False)
     embedding_dim: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
@@ -151,8 +156,8 @@ class AIActivityLogModel(Base):
     model: Mapped[str] = mapped_column(String(120), nullable=False)
     success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    request_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    response_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    request_text: Mapped[str] = mapped_column(DocumentText, nullable=False, default="")
+    response_text: Mapped[str] = mapped_column(DocumentText, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
@@ -172,57 +177,60 @@ class TalentModel(Base):
     """One source spreadsheet row per record; names are not unique identifiers."""
 
     __tablename__ = "talents"
-    __table_args__ = (UniqueConstraint("source_id", "sheet_name", "source_row", name="uq_talent_source_row"),)
+    __table_args__ = (
+        UniqueConstraint("source_id", "sheet_name", "source_row", name="uq_talent_source_row"),
+        Index("ix_talents_name", "name", mysql_length=191),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     source_id: Mapped[str] = mapped_column(ForeignKey("knowledge_sources.id"), nullable=False, index=True)
     sheet_name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_row: Mapped[int] = mapped_column(Integer, nullable=False)
-    raw_data_json: Mapped[str] = mapped_column(Text, nullable=False)
-    formulas_json: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_data_json: Mapped[str] = mapped_column(DocumentText, nullable=False)
+    formulas_json: Mapped[str] = mapped_column(DocumentText, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    name: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)  # 姓名
-    organization: Mapped[str | None] = mapped_column(Text, nullable=True)  # 当前机构
-    position: Mapped[str | None] = mapped_column(Text, nullable=True)  # 当前职务
-    biography: Mapped[str | None] = mapped_column(Text, nullable=True)  # 详细个人简介
-    education: Mapped[str | None] = mapped_column(Text, nullable=True)  # 教育经历
-    work_experience: Mapped[str | None] = mapped_column(Text, nullable=True)  # 工作经历
-    projects: Mapped[str | None] = mapped_column(Text, nullable=True)  # 创业／项目经历
-    achievements: Mapped[str | None] = mapped_column(Text, nullable=True)  # 代表成果
-    talent_identity: Mapped[str | None] = mapped_column(Text, nullable=True)  # 人才身份
-    industry_direction: Mapped[str | None] = mapped_column(Text, nullable=True)  # 未来产业方向
-    keywords: Mapped[str | None] = mapped_column(Text, nullable=True)  # 细分关键词
-    public_views: Mapped[str | None] = mapped_column(Text, nullable=True)  # 公开观点
-    contact_clues: Mapped[str | None] = mapped_column(Text, nullable=True)  # 公开联系方式线索
-    source_links: Mapped[str | None] = mapped_column(Text, nullable=True)  # 来源链接
-    change_summary: Mapped[str | None] = mapped_column(Text, nullable=True)  # 本次变化摘要
-    pending_confirmation: Mapped[str | None] = mapped_column(Text, nullable=True)  # 待人工确认事项
-    last_auto_update: Mapped[str | None] = mapped_column(Text, nullable=True)  # 上次自动更新时间
-    auto_update_result: Mapped[str | None] = mapped_column(Text, nullable=True)  # 自动更新结果
-    operation_records: Mapped[str | None] = mapped_column(Text, nullable=True)  # 关联运营记录
-    location: Mapped[str | None] = mapped_column(Text, nullable=True)  # 所在国家／城市
-    english_name: Mapped[str | None] = mapped_column(Text, nullable=True)  # 英文名
-    technical_role: Mapped[str | None] = mapped_column(Text, nullable=True)  # 技术角色定位
-    evidence_links: Mapped[str | None] = mapped_column(Text, nullable=True)  # 证据链接
-    scholar_citations: Mapped[str | None] = mapped_column(Text, nullable=True)  # Google Scholar总引用数
-    scholar_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # Google Scholar主页
-    scholar_h_index: Mapped[str | None] = mapped_column(Text, nullable=True)  # Google Scholar h-index
-    academic_updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)  # 学术指标更新时间
-    open_source_assets: Mapped[str | None] = mapped_column(Text, nullable=True)  # 开源资产摘要
-    openalex_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # OpenAlex主页
-    openalex_works: Mapped[str | None] = mapped_column(Text, nullable=True)  # OpenAlex作品数
-    openalex_citations: Mapped[str | None] = mapped_column(Text, nullable=True)  # OpenAlex总引用数
-    openalex_h_index: Mapped[str | None] = mapped_column(Text, nullable=True)  # OpenAlex h-index
-    openalex_updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)  # OpenAlex指标更新时间
-    research_document: Mapped[str | None] = mapped_column(Text, nullable=True)  # 深度调研文档
-    domain: Mapped[str | None] = mapped_column(Text, nullable=True)  # 领域
+    name: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 姓名
+    organization: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 当前机构
+    position: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 当前职务
+    biography: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 详细个人简介
+    education: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 教育经历
+    work_experience: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 工作经历
+    projects: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 创业／项目经历
+    achievements: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 代表成果
+    talent_identity: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 人才身份
+    industry_direction: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 未来产业方向
+    keywords: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 细分关键词
+    public_views: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 公开观点
+    contact_clues: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 公开联系方式线索
+    source_links: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 来源链接
+    change_summary: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 本次变化摘要
+    pending_confirmation: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 待人工确认事项
+    last_auto_update: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 上次自动更新时间
+    auto_update_result: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 自动更新结果
+    operation_records: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 关联运营记录
+    location: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 所在国家／城市
+    english_name: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 英文名
+    technical_role: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 技术角色定位
+    evidence_links: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 证据链接
+    scholar_citations: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # Google Scholar总引用数
+    scholar_url: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # Google Scholar主页
+    scholar_h_index: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # Google Scholar h-index
+    academic_updated_at: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 学术指标更新时间
+    open_source_assets: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 开源资产摘要
+    openalex_url: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # OpenAlex主页
+    openalex_works: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # OpenAlex作品数
+    openalex_citations: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # OpenAlex总引用数
+    openalex_h_index: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # OpenAlex h-index
+    openalex_updated_at: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # OpenAlex指标更新时间
+    research_document: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 深度调研文档
+    domain: Mapped[str | None] = mapped_column(DocumentText, nullable=True)  # 领域
 
 
 class UserModel(Base):
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    password_hash: Mapped[str] = mapped_column(DocumentText, nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="viewer")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -248,7 +256,7 @@ class AuditModel(Base):
     user_id: Mapped[str | None] = mapped_column(String(80), index=True)
     action: Mapped[str] = mapped_column(String(120), nullable=False)
     target: Mapped[str] = mapped_column(String(255), nullable=False)
-    detail: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    detail: Mapped[str] = mapped_column(DocumentText, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
 
 
@@ -282,7 +290,7 @@ class ImportJobModel(Base):
     completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(DocumentText, nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -293,7 +301,7 @@ class TalentRevisionModel(Base):
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     talent_id: Mapped[str] = mapped_column(ForeignKey("talents.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[str | None] = mapped_column(String(80))
-    data_json: Mapped[str] = mapped_column(Text, nullable=False)
+    data_json: Mapped[str] = mapped_column(DocumentText, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
@@ -308,7 +316,7 @@ class SavedConversationModel(Base):
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
-    messages_json: Mapped[str] = mapped_column(Text, nullable=False)
+    messages_json: Mapped[str] = mapped_column(DocumentText, nullable=False)
     favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     feedback: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -329,16 +337,16 @@ class AgentTraceModel(Base):
     conversation_id: Mapped[str | None] = mapped_column(String(80), index=True)
     turn_id: Mapped[str | None] = mapped_column(String(80), index=True)
     knowledge_base_id: Mapped[str | None] = mapped_column(String(80), index=True)
-    question: Mapped[str] = mapped_column(Text)
-    answer: Mapped[str] = mapped_column(Text, default='')
+    question: Mapped[str] = mapped_column(DocumentText)
+    answer: Mapped[str] = mapped_column(DocumentText, default='')
     status: Mapped[str] = mapped_column(String(20), default='running', index=True)
-    error: Mapped[str] = mapped_column(Text, default='')
+    error: Mapped[str] = mapped_column(DocumentText, default='')
     created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     first_token_ms: Mapped[int | None] = mapped_column(Integer)
-    request_json: Mapped[str] = mapped_column(Text, default='{}')
-    stages_json: Mapped[str] = mapped_column(Text, default='[]')
-    calls_json: Mapped[str] = mapped_column(Text, default='[]')
+    request_json: Mapped[str] = mapped_column(DocumentText, default='{}')
+    stages_json: Mapped[str] = mapped_column(DocumentText, default='[]')
+    calls_json: Mapped[str] = mapped_column(DocumentText, default='[]')
     call_count: Mapped[int] = mapped_column(Integer, default=0)
     unknown_calls: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)

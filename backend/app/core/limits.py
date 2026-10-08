@@ -2,12 +2,24 @@
 import asyncio
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select, update
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import authenticate, now, usage_counter
 from app.db.session import get_db
 from app.db.models import RequestBudgetModel
+
+def ensure_budget(db, user_id, day):
+    values = dict(user_id=user_id, day=day, requests=0, tokens=0, reserved=0)
+    if db.get_bind().dialect.name == 'mysql':
+        statement = mysql_insert(RequestBudgetModel).values(**values)
+        # 重复时保持计数不变；不能用 REPLACE，否则会重置预算。
+        statement = statement.on_duplicate_key_update(user_id=statement.inserted.user_id)
+    else:
+        statement = sqlite_insert(RequestBudgetModel).values(**values).on_conflict_do_nothing()
+    db.execute(statement)
+
 
 _active=0
 
@@ -23,7 +35,7 @@ async def inference_budget(request:Request,db:Session=Depends(get_db),user=Depen
     day=now().date().isoformat()
     # Each dispatch tops up this initial reservation to its actual input/output bound.
     reserve=4096 + settings.model_max_output_tokens
-    db.execute(insert(RequestBudgetModel).values(user_id=user.id,day=day,requests=0,tokens=0,reserved=0).on_conflict_do_nothing())
+    ensure_budget(db, user.id, day)
     result=db.execute(update(RequestBudgetModel).where(RequestBudgetModel.user_id==user.id,RequestBudgetModel.day==day,
         RequestBudgetModel.requests<settings.model_requests_per_day,
         RequestBudgetModel.tokens+RequestBudgetModel.reserved+reserve<=settings.daily_token_budget).values(
@@ -86,7 +98,7 @@ def embed_with_budget(db,job,client,texts):
     if not job.user_id:return client.embed_texts(texts)
     from app.core.security import usage_counter
     day=now().date().isoformat();reserve=sum(len(text) for text in texts)*4
-    db.execute(insert(RequestBudgetModel).values(user_id=job.user_id,day=day,requests=0,tokens=0,reserved=0).on_conflict_do_nothing())
+    ensure_budget(db, job.user_id, day)
     result=db.execute(update(RequestBudgetModel).where(RequestBudgetModel.user_id==job.user_id,RequestBudgetModel.day==day,
         RequestBudgetModel.tokens+RequestBudgetModel.reserved+reserve<=settings.daily_token_budget).values(reserved=RequestBudgetModel.reserved+reserve))
     db.commit()

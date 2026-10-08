@@ -76,8 +76,12 @@ def overview(
     table = filters.query().subquery()
     summary = dict(db.execute(select(*metrics(table))).mappings().one())
     # Database stores UTC. Bucket in the viewer's timezone, including empty dates.
-    day = func.date(func.datetime(table.c.created_at, f'{filters.offset:+d} minutes'))
-    points = {row['date']: dict(row) for row in db.execute(
+    if db.get_bind().dialect.name == 'mysql':
+        from sqlalchemy import literal_column
+        day = func.date(func.timestampadd(literal_column('MINUTE'), filters.offset, table.c.created_at))
+    else:
+        day = func.date(func.datetime(table.c.created_at, f'{filters.offset:+d} minutes'))
+    points = {str(row['date']): {**dict(row), 'date': str(row['date'])} for row in db.execute(
         select(day.label('date'), *metrics(table)).group_by(day).order_by(day)
     ).mappings()}
     daily = []

@@ -16,6 +16,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # MySQL 5.7 禁止 TEXT 默认值；应用 ORM 已提供这些字段的默认值。
+    text_options = {} if op.get_bind().dialect.name == 'mysql' else {'server_default': ''}
     op.create_table(
         "categories",
         sa.Column("id", sa.String(length=80), primary_key=True),
@@ -27,9 +29,9 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=80), primary_key=True),
         sa.Column("title", sa.String(length=160), nullable=False),
         sa.Column("summary", sa.String(length=500), nullable=False, server_default=""),
-        sa.Column("content", sa.Text(), nullable=False, server_default=""),
+        sa.Column("content", sa.Text(), nullable=False, **text_options),
         sa.Column("category_id", sa.String(length=80), nullable=False),
-        sa.Column("tags", sa.Text(), nullable=False, server_default=""),
+        sa.Column("tags", sa.Text(), nullable=False, **text_options),
         sa.Column("status", sa.String(length=20), nullable=False, server_default="draft"),
         sa.Column("updated_at", sa.Date(), nullable=False),
         sa.ForeignKeyConstraint(["category_id"], ["categories.id"]),
@@ -41,7 +43,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("provider", sa.String(length=40), nullable=False),
         sa.Column("base_url", sa.String(length=300), nullable=False),
-        sa.Column("api_key_encrypted", sa.Text(), nullable=False, server_default=""),
+        sa.Column("api_key_encrypted", sa.Text(), nullable=False, **text_options),
         sa.Column("api_key_hint", sa.String(length=40), nullable=False, server_default="未填写"),
         sa.Column("default_model", sa.String(length=120), nullable=False),
         sa.Column("is_default", sa.Boolean(), nullable=False, server_default=sa.false()),

@@ -18,15 +18,21 @@ def init_db() -> None:
             with engine.connect() as conn:
                 stamped = 'alembic_version' in tables and conn.execute(text('SELECT version_num FROM alembic_version')).first()
             if not stamped:
-                raise RuntimeError('Existing database has no migration version. Back up and run scripts/prepare_production.py before production startup.')
+                script = 'prepare_mysql.py' if engine.dialect.name == 'mysql' else 'prepare_production.py'
+                raise RuntimeError(f'Existing database has no migration version. Back up and run scripts/{script} before production startup.')
         config = Config(str(Path(__file__).resolve().parents[2] / 'alembic.ini'))
         config.set_main_option('script_location', str(Path(__file__).resolve().parents[2] / 'alembic'))
-        command.upgrade(config, 'head')
+        # 迁移必须沿用本进程已经选中的连接，不能重新探测后切到另一套库。
+        with engine.begin() as connection:
+            config.attributes['connection'] = connection
+            command.upgrade(config, 'head')
     else:
         Base.metadata.create_all(bind=engine)
         from app.db.trace_schema import upgrade_trace_counters
         with engine.begin() as connection:
             upgrade_trace_counters(connection)
+            from app.db.mysql_schema import widen_mysql_text
+            widen_mysql_text(connection)
         # create_all does not add columns to an existing local database.
         from sqlalchemy import inspect, text
         if 'enable_thinking' not in {c['name'] for c in inspect(engine).get_columns('ai_providers')}:
