@@ -26,6 +26,33 @@ def run(*args, **kwargs):
                           stderr=subprocess.PIPE, universal_newlines=True, **kwargs).stdout.strip()
 
 
+def pull_image(reference, timeout=1800, heartbeat=30):
+    # Slow registry transfers must remain visible without printing credentials.
+    print('Pulling image: ' + reference, flush=True)
+    started = time.monotonic()
+    process = subprocess.Popen(['docker', 'pull', reference], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, universal_newlines=True)
+    try:
+        while True:
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                raise RuntimeError('Image download exceeded {} seconds; existing site was not switched. Retry after checking registry connectivity.'.format(timeout))
+            try:
+                output, errors = process.communicate(timeout=min(heartbeat, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                print('Image download still running: {} seconds elapsed (limit {} seconds).'.format(
+                    int(time.monotonic() - started), timeout), flush=True)
+        if process.returncode:
+            # Registry errors can contain signed URLs. Do not echo raw output.
+            raise RuntimeError('Image download failed; check Docker daemon logs and registry connectivity. Existing site was not switched.')
+        print('Image downloaded in {} seconds.'.format(int(time.monotonic() - started)), flush=True)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+
+
 def atomic_json(path, value):
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(value, indent=2) + '\n')
@@ -81,7 +108,7 @@ class Releases:
         for role in ('backend', 'frontend'):
             ref = value[role]
             if not LOCAL_IMAGE.fullmatch(ref):
-                run('docker', 'pull', ref)
+                pull_image(ref)
             info = json.loads(run('docker', 'image', 'inspect', ref))[0]
             if info['Architecture'] != 'amd64':
                 raise RuntimeError('ECS requires linux/amd64 images')

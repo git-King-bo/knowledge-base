@@ -26,7 +26,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 30
+    # Each of the two first-time image downloads is bounded to 30 minutes.
+    # Leave additional time for health checks, backups, and worker draining.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - name: Validate inputs
@@ -76,7 +78,7 @@ jobs:
               assert manifest['version']==e['VERSION'], 'Artifact version mismatch'
               payload=json.dumps(dict(manifest=manifest, registry_user=e['REGISTRY_USER'], registry_token=e['REGISTRY_TOKEN']))
             args=['ssh','-T','-i',str(key),'-o','IdentitiesOnly=yes','-o','BatchMode=yes',
-              '-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(hosts),
+              '-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(hosts),'-o','ConnectTimeout=20',
               '-o','ServerAliveInterval=15','-o','ServerAliveCountMax=20',
               'root@120.27.205.41',command]
             subprocess.run(args,input=payload,text=True,check=True)

@@ -17,7 +17,7 @@ def main():
     if not match:
         raise ValueError('Only kb-release deployment commands are permitted')
     action, version = match.groups()
-    controller = ['python3', str(ROOT / 'deploy/release.py')]
+    controller = ['python3', '-u', str(ROOT / 'deploy/release.py')]
     if action in ('bootstrap', 'stage'):
         # 只读有限长度的 JSON，绝不把客户端输入作为 shell 脚本执行。
         raw = sys.stdin.read(65537)
@@ -32,9 +32,11 @@ def main():
             if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', username):
                 raise ValueError('Invalid registry account')
             # 临时 GITHUB_TOKEN 仅用于此次 pull；临时 Docker 凭据随任务删除。
+            print('Connecting to image registry...', flush=True)
             subprocess.run(['docker', 'login', 'ghcr.io', '-u', username, '--password-stdin'],
                            input=payload['registry_token'], universal_newlines=True, env=env,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=60)
+            print('Registry login succeeded.', flush=True)
             manifest = Path(folder) / 'manifest.json'
             manifest.write_text(json.dumps(payload['manifest']))
             if action == 'bootstrap':

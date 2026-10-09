@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 spec = importlib.util.spec_from_file_location('release', Path(__file__).resolve().parents[1] / 'release.py')
 r = importlib.util.module_from_spec(spec)
@@ -11,6 +11,34 @@ spec.loader.exec_module(r)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_slow_image_pull_reports_progress(self):
+        process=Mock(returncode=0)
+        process.communicate.side_effect=[r.subprocess.TimeoutExpired('docker',30),('done','')]
+        process.poll.return_value=0
+        with patch.object(r.subprocess,'Popen',return_value=process),patch('builtins.print') as log:
+            r.pull_image('ghcr.io/example@sha256:abc')
+        self.assertTrue(any('still running' in str(call) for call in log.call_args_list))
+        process.kill.assert_not_called()
+
+    def test_image_pull_timeout_stops_only_pull_client(self):
+        process=Mock()
+        process.poll.return_value=None
+        with patch.object(r.subprocess,'Popen',return_value=process), \
+             patch.object(r.time,'monotonic',side_effect=[0,2]),patch('builtins.print'):
+            with self.assertRaisesRegex(RuntimeError,'exceeded'):
+                r.pull_image('image',timeout=1)
+        process.kill.assert_called_once()
+        process.communicate.assert_called_once()
+
+    def test_registry_error_does_not_expose_signed_urls(self):
+        process=Mock(returncode=1)
+        process.communicate.return_value=('', 'https://registry.example/blob?secret=value')
+        process.poll.return_value=1
+        with patch.object(r.subprocess,'Popen',return_value=process),patch('builtins.print') as log:
+            with self.assertRaisesRegex(RuntimeError,'Image download failed') as error:
+                r.pull_image('image')
+        self.assertNotIn('secret',str(error.exception)+str(log.call_args_list))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
