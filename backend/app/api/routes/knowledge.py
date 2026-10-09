@@ -321,18 +321,31 @@ async def upload_knowledge_file(
     return await _ingest_upload(file=file, repo=repo)
 
 
-def _talent_query_planner(db, question, provider, api_key, model, knowledge_base_id):
+def _talent_query_planner(db, question, provider, api_key, model, knowledge_base_id, request_context=None):
     ai_repo = AIRepository(db)
     @traced('人才查询规划')
     def plan_talent_query(schema):
-        instructions = query_planner_instructions()
+        if schema.get('phase') == 'verify_candidates':
+            from app.services.talent_evidence import verification_instructions
+            instructions = verification_instructions(len(schema['conditions']))
+            schema = {**schema, 'candidates': [{'id':item['id'],'passages':item['passages']} for item in schema['candidates']]}
+        else:
+            instructions = query_planner_instructions()
+        request_data={"question":question,"schema":schema}
+        if request_context and schema.get('phase')!='verify_candidates':
+            request_data['request_context']=request_context
         messages = [ChatMessage(role="system", content=instructions),
-                    ChatMessage(role="user", content=json.dumps({"question": question, "schema": schema}, ensure_ascii=False))]
+                    ChatMessage(role="user", content=json.dumps(request_data, ensure_ascii=False))]
         started = perf_counter()
         result = None
         failure = ''
         try:
-            result = ai_provider_registry.resolve(provider.provider).chat(provider, messages, model or provider.default_model, api_key)
+            from app.ai.base import json_output_requested
+            token = json_output_requested.set(True)
+            try:
+                result = ai_provider_registry.resolve(provider.provider).chat(provider, messages, model or provider.default_model, api_key)
+            finally:
+                json_output_requested.reset(token)
             return result.content
         except Exception as exc:
             failure = model_error_message(exc)
@@ -357,6 +370,16 @@ def search_knowledge(
 ) -> KnowledgeSearchResult:
     repo = KnowledgeIngestionRepository(db)
     _require_active_base(repo, knowledge_base_id)
+    credentials = AIRepository(db).get_default_provider_credentials()
+    planner = _talent_query_planner(db, q, *credentials, None, knowledge_base_id) if credentials else None
+    from app.services.talent_hybrid import hybrid_talents
+    structured = talent_context(q, repo.list_active_spreadsheet_sources(knowledge_base_id), planner, max_results=top_k,
+        hybrid_search=lambda question,plan,sheets:hybrid_talents(db,knowledge_base_id,question,plan,sheets))
+    evidence = json.loads(structured) if structured and structured.startswith('{') else {}
+    if 'aggregate' in evidence:
+        return KnowledgeSearchResult(query=q, hits=[], talent_results=[], talent_notice=render_aggregate_answer(evidence))
+    if evidence.get('results'):
+        return KnowledgeSearchResult(query=q,hits=[],talent_results=evidence['results'])
     query_embedding = None
     embedding_client = EmbeddingClient(db=db, knowledge_base_id=knowledge_base_id)
     if embedding_client.enabled:
@@ -371,15 +394,7 @@ def search_knowledge(
         embedding_model=settings.embedding_model if query_embedding else None,
         knowledge_base_id=knowledge_base_id,
     )
-    credentials = AIRepository(db).get_default_provider_credentials()
-    planner = _talent_query_planner(db, q, *credentials, None, knowledge_base_id) if credentials else None
-    structured = talent_context(q, repo.list_active_spreadsheet_sources(knowledge_base_id), planner, max_results=top_k)
-    evidence = json.loads(structured) if structured and structured.startswith('{') else {}
     talent_results = evidence.get('results', [])
-    if 'aggregate' in evidence:
-        return KnowledgeSearchResult(query=q, hits=[], talent_results=[], talent_notice=render_aggregate_answer(evidence))
-    if talent_results:
-        ranked = []
     return KnowledgeSearchResult(query=q, hits=ranked, talent_results=talent_results,
                                  talent_notice=structured if structured and not structured.startswith('{') else None)
 
@@ -404,16 +419,35 @@ def _prepare_ask(payload: AskRequest, db: Session):
         page_state = next_page_state(payload, history)
     except ValueError:
         raise HTTPException(422, '查询状态无效，请重新输入筛选条件')
-    retrieval_query = page_state.query if page_state else resolve_retrieval_query(payload, history, provider, api_key, db)
+    from app.services.talent_results import result_scope, load_result, sort_result
+    talent_sources=ingestion_repo.list_active_spreadsheet_sources(payload.knowledge_base_id)
+    snapshot_scope=result_scope(db,payload.knowledge_base_id,talent_sources)
+    previous_state=history[-1].query_state if history else None
+    previous_result=None
+    if (not page_state and not payload.continuation and previous_state
+            and previous_state.knowledge_base_id==payload.knowledge_base_id and previous_state.snapshot_id):
+        previous_result=load_result(previous_state.snapshot_id,snapshot_scope,previous_state.query,previous_state.plan)
+    sort_fields=sorted({field for group in previous_result['results'] for row in group.get('records',[])
+                        for field in row['fields']}) if previous_result else None
+    result_action={}
+    retrieval_query = page_state.query if page_state else resolve_retrieval_query(payload, history, provider, api_key, db,
+        sort_fields=sort_fields,result_action=result_action)
     trace_note('确定检索问题', original=payload.question, query=retrieval_query, reused_page_plan=bool(page_state))
-    plan_talent_query = _talent_query_planner(db, retrieval_query, provider, api_key, payload.model, payload.knowledge_base_id)
+    plan_talent_query = _talent_query_planner(db, retrieval_query, provider, api_key, payload.model, payload.knowledge_base_id,
+        request_context={'original_question':payload.question,
+                         'previous_question':history[-1].question if history else None,
+                         'previous_plan':history[-1].query_state.plan if history and history[-1].query_state else None})
+    from app.services.talent_hybrid import hybrid_talents
     try:
         with trace_stage('人才结构化检索'):
-            structured_talents = talent_context(retrieval_query,
-                ingestion_repo.list_active_spreadsheet_sources(payload.knowledge_base_id), plan_talent_query,
+            structured_talents = sort_result(previous_result,result_action['field'],result_action['descending'],
+                snapshot_scope,retrieval_query,payload.talent_page_size) if result_action else talent_context(retrieval_query,
+                talent_sources, plan_talent_query,
                 max_results=page_state.page_size if page_state else payload.talent_page_size,
                 saved_plan=TalentPlan.model_validate(page_state.plan) if page_state else None,
-                offset=page_state.offset + page_state.returned if page_state else 0)
+                offset=page_state.offset + page_state.returned if page_state else 0,
+                snapshot_id=page_state.snapshot_id if page_state else None,snapshot_scope=snapshot_scope,
+                hybrid_search=lambda question,plan,sheets:hybrid_talents(db,payload.knowledge_base_id,question,plan,sheets))
     except ValueError:
         raise RetrievalClarification('人才表的字段已变化，请重新输入筛选条件后查询。', provider.id, payload.model or provider.default_model)
     if page_state and not structured_talents:
@@ -436,7 +470,7 @@ def _prepare_ask(payload: AskRequest, db: Session):
                                      'query_state': response.query_state.model_dump() if response.query_state else None}, ensure_ascii=False),
             response_text=response.answer, knowledge_base_id=payload.knowledge_base_id,
             success=True, latency_ms=0, record_trace_call=False)
-        for step in ['查询向量编码', '知识片段召回与加权排序', '独立精排模型', '联网检索', '回答生成模型']:
+        for step in (['联网检索', '回答生成模型'] if evidence.get('retrieval') else ['查询向量编码', '知识片段召回与加权排序', '独立精排模型', '联网检索', '回答生成模型']):
             trace_note(step, status='skipped', reason='人才结构化路径直接基于全表筛选和分页结果输出，不执行此环节')
         trace_note('结构化结果生成', records=len(row_sources), model_call=False, query_state=response.query_state.model_dump() if response.query_state else None)
         raise PreparedTalentAnswer(response)

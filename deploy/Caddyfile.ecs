@@ -1,0 +1,35 @@
+# IP 地址使用 Let's Encrypt 短期证书，由 Caddy 自动续期。
+{
+    # 浏览器直接访问 IP 时通常不发送 SNI，显式指定匹配的 IP 证书。
+    default_sni {$SITE_ADDRESS}
+}
+
+{$SITE_ADDRESS} {
+    tls {
+        issuer acme https://acme-v02.api.letsencrypt.org/directory {
+            profile shortlived
+        }
+    }
+    encode zstd gzip
+    handle /api/* {
+        reverse_proxy backend:8001 {
+            flush_interval -1
+        }
+    }
+    handle /ready {
+        reverse_proxy backend:8001
+    }
+    handle /health {
+        reverse_proxy backend:8001
+    }
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        X-Frame-Options DENY
+    }
+}

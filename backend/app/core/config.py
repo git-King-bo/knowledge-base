@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     allow_private_providers: bool = Field(default=False, alias="APP_ALLOW_PRIVATE_PROVIDERS")
     session_hours: int = Field(default=12, ge=1, le=168, alias="APP_SESSION_HOURS")
     worker_enabled: bool = Field(default=True, alias="APP_WORKER_ENABLED")
+    migration_mode: Literal['upgrade', 'check'] = Field(default='upgrade', alias='APP_MIGRATION_MODE')
     requests_per_minute: int = Field(default=60, ge=1, alias="APP_REQUESTS_PER_MINUTE")
     model_requests_per_day: int = Field(default=200, ge=1, alias="APP_MODEL_REQUESTS_PER_DAY")
     daily_token_budget: int = Field(default=2000000, ge=1, alias="APP_DAILY_TOKEN_BUDGET")

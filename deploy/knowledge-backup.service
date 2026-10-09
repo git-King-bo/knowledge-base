@@ -1,0 +1,8 @@
+[Unit]
+Description=Knowledge base MySQL and uploaded files backup
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/knowledge-base/deploy/backup-ecs.sh

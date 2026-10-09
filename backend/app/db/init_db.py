@@ -22,6 +22,16 @@ def init_db() -> None:
                 raise RuntimeError(f'Existing database has no migration version. Back up and run scripts/{script} before production startup.')
         config = Config(str(Path(__file__).resolve().parents[2] / 'alembic.ini'))
         config.set_main_option('script_location', str(Path(__file__).resolve().parents[2] / 'alembic'))
+        # 灰度的新旧程序共享数据库，只检查版本，禁止启动时隐式改表。
+        if settings.migration_mode == 'check':
+            from alembic.runtime.migration import MigrationContext
+            from alembic.script import ScriptDirectory
+            with engine.connect() as connection:
+                current = set(MigrationContext.configure(connection).get_current_heads())
+            expected = set(ScriptDirectory.from_config(config).get_heads())
+            if current != expected:
+                raise RuntimeError('Database schema does not match this release; automatic migration is disabled')
+            return
         # 迁移必须沿用本进程已经选中的连接，不能重新探测后切到另一套库。
         with engine.begin() as connection:
             config.attributes['connection'] = connection

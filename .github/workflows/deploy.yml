@@ -1,0 +1,83 @@
+name: Deploy release
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'bootstrap=首次接管；stage=灰度；promote=全量；rollback=指定版本回滚'
+        type: choice
+        options: [stage, promote, rollback, abort, status, retire, bootstrap]
+        required: true
+      version:
+        description: '版本号，例如 sha-0123456789ab；status/abort/retire 可留空'
+        required: false
+        type: string
+      build_run_id:
+        description: 'stage 时填写 Build release images 的成功运行 ID'
+        required: false
+        type: string
+permissions:
+  contents: read
+  actions: read
+  packages: read
+concurrency:
+  group: knowledge-base-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate inputs
+        env:
+          ACTION: ${{ inputs.action }}
+          VERSION: ${{ inputs.version }}
+          RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          python - <<'PY'
+          import os, re
+          e=os.environ
+          if e['ACTION'] in ('bootstrap','stage','promote','rollback'):
+            assert re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,39}',e['VERSION']), 'Invalid version'
+          if e['ACTION'] in ('bootstrap','stage'):
+            assert e['RUN_ID'].isdigit(), 'Build run ID required'
+          PY
+      - name: Download verified manifest
+        if: inputs.action == 'stage' || inputs.action == 'bootstrap'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-manifest
+          path: release-artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.build_run_id }}
+      - name: Execute restricted deployment command
+        env:
+          ACTION: ${{ inputs.action }}
+          VERSION: ${{ inputs.version }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, subprocess, tempfile
+          e=os.environ
+          with tempfile.TemporaryDirectory() as folder:
+            key=pathlib.Path(folder)/'key'; hosts=pathlib.Path(folder)/'known_hosts'
+            key.write_text(e['DEPLOY_SSH_KEY']+'\n'); key.chmod(0o600)
+            hosts.write_text(e['DEPLOY_KNOWN_HOSTS']+'\n')
+            command='kb-release '+e['ACTION']
+            if e['ACTION'] in ('bootstrap','stage','promote','rollback'):
+              command+=' '+e['VERSION']
+            payload=''
+            if e['ACTION'] in ('bootstrap','stage'):
+              manifest=json.loads(pathlib.Path('release-artifact/release.json').read_text())
+              assert manifest['version']==e['VERSION'], 'Artifact version mismatch'
+              payload=json.dumps(dict(manifest=manifest, registry_user=e['REGISTRY_USER'], registry_token=e['REGISTRY_TOKEN']))
+            args=['ssh','-T','-i',str(key),'-o','IdentitiesOnly=yes','-o','BatchMode=yes',
+              '-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(hosts),
+              '-o','ServerAliveInterval=15','-o','ServerAliveCountMax=20',
+              'root@120.27.205.41',command]
+            subprocess.run(args,input=payload,text=True,check=True)
+          PY

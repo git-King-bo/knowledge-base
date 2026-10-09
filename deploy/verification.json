@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-09",
+  "backend_tests": {
+    "run": 93,
+    "passed": 92,
+    "skipped": 1
+  },
+  "deployment_unit_tests": 7,
+  "frontend": "tests and production build passed",
+  "docker_platform": "linux/amd64",
+  "docker_integration": [
+    "bootstrap",
+    "cookie canary frontend and API",
+    "singleton worker",
+    "promote",
+    "rollback to selected version",
+    "database writes preserved",
+    "abort",
+    "schema mismatch refused"
+  ],
+  "server": "release tooling and restricted CI SSH key installed; legacy production remains active",
+  "github": "not connected: git SSH authentication failed; environment secrets pending"
+}

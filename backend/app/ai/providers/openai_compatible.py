@@ -82,6 +82,10 @@ class OpenAICompatibleProvider(AIProvider):
         }
 
         payload.update(self._thinking_parameters(config, payload["model"]))
+        from app.ai.base import json_output_requested
+        host = (urlsplit(config.base_url).hostname or '').lower()
+        if json_output_requested.get() and (host.endswith('.aliyuncs.com') or host == 'api.openai.com'):
+            payload['response_format'] = {'type': 'json_object'}
         from app.services.agent_trace import trace_note
         trace_note("发送模型请求", protocol="chat/completions", parameters={k: v for k, v in payload.items() if k != "messages"}, message_count=len(messages))
 

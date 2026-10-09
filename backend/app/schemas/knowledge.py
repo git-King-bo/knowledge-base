@@ -85,9 +85,10 @@ class ContinuationContext(BaseModel):
 
 
 class TalentQueryState(BaseModel):
+    snapshot_id: str | None = Field(default=None,max_length=80)
     knowledge_base_id: str | None = None
     query: str = Field(max_length=5000)
-    plan: dict = Field(default_factory=dict, max_length=8)
+    plan: dict = Field(default_factory=dict, max_length=11)
     offset: int = Field(default=0, ge=0, le=1_000_000)
     page_size: int = Field(default=5, ge=1, le=100)
     returned: int = Field(default=0, ge=0, le=100)

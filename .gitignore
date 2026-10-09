@@ -48,3 +48,5 @@ frontend/.env.*
 *.db-shm
 *.db-wal
 deploy/production.env
+deploy/.credentials/
+releases/

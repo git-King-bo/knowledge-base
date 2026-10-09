@@ -126,3 +126,27 @@ class TalentConversationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('旧会话没有分页记录', response.json()['answer'])
         model.assert_not_called()
+
+    def test_sort_followup_reuses_all_verified_results_and_pages_without_retrieval(self):
+        base=self.roster()
+        with patch('app.services.talent_results.result_scope',return_value=('user',base,'revision')):
+            with patch.object(OpenAICompatibleProvider,'chat',side_effect=self.chat):
+                first=self.client.post('/api/knowledge/ask',json={
+                    'question':'清华大学人才','knowledge_base_id':base}).json()
+            history=[{'question':'清华大学人才','answer':first['answer'],'query_state':first['query_state']}]
+            def classify(config,messages,model,key):
+                self.assertIn('result_sort',messages[0].content)
+                return ChatResult(content=json.dumps({'result_sort':{'field':'OpenAlex h-index','descending':False}}),usage=TokenUsage())
+            with patch.object(OpenAICompatibleProvider,'chat',side_effect=classify) as model, \
+                 patch('app.services.talent_search.read_talent_sheets',side_effect=AssertionError('No full table reread')), \
+                 patch('app.services.talent_hybrid.hybrid_talents',side_effect=AssertionError('No repeated semantic retrieval')):
+                result=self.client.post('/api/knowledge/ask',json={
+                    'question':'按照openlex h-index从低到高排序','knowledge_base_id':base,'history':history}).json()
+                self.assertEqual(model.call_count,1)
+                self.assertEqual([r['fields']['姓名'] for r in result['row_sources']],['人才8','人才7','人才6','人才5','人才4'])
+                self.assertIn('上一轮已匹配',result['answer'])
+                self.assertIn('27 条缺少',result['answer'])
+                history.append({'question':'按照openlex h-index从低到高排序','answer':result['answer'],'query_state':result['query_state']})
+                page=self.client.post('/api/knowledge/ask',json={'question':'继续','knowledge_base_id':base,'history':history}).json()
+                self.assertEqual(model.call_count,1)
+                self.assertEqual([r['fields']['姓名'] for r in page['row_sources']],['人才3','人才2','人才1'])

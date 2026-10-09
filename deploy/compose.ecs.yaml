@@ -1,0 +1,44 @@
+# 在服务器 /opt/knowledge-base 中运行：
+# docker compose -p knowledge-base -f deploy/compose.ecs.yaml up -d --build
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+      args:
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple
+    env_file: production.env
+    volumes:
+      # 数据和原始资料独立于容器，保留历史相对 storage/uploads 路径。
+      - ../data:/data
+      - ../data/storage:/app/storage
+    restart: unless-stopped
+    stop_grace_period: 300s
+    mem_limit: 1100m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+  web:
+    image: caddy:2.11.7-alpine
+    environment:
+      SITE_ADDRESS: 120.27.205.41
+    ports: ["80:80", "443:443"]
+    volumes:
+      # 前端已在本机编译，服务器只提供静态文件，避免构建挤占 2GB 内存。
+      - ../frontend/dist:/srv:ro
+      - ./Caddyfile.ecs:/etc/caddy/Caddyfile:ro
+      - ../data/caddy:/data
+      - ../data/caddy-config:/config
+    depends_on:
+      backend: {condition: service_healthy}
+    restart: unless-stopped
+    mem_limit: 160m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}

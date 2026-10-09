@@ -22,6 +22,7 @@ def ensure_budget(db, user_id, day):
 
 
 _active=0
+MAX_MODEL_CALLS_PER_OPERATION = 4
 
 async def inference_budget(request:Request,db:Session=Depends(get_db),user=Depends(authenticate)):
     global _active
@@ -88,7 +89,7 @@ def claim_model_input(messages):
     if characters>60000:raise ValueError('上下文超过60000字符，请缩小范围')
     if counter is not None:
         dispatched=counter.get('dispatched',0)
-        if dispatched>=4:raise ValueError('单次操作模型调用次数已达上限，请缩小查询范围')
+        if dispatched>=MAX_MODEL_CALLS_PER_OPERATION:raise ValueError('单次操作模型调用次数已达上限，请缩小查询范围')
         estimate=sum(len(m.content.encode('utf-8'))+32 for m in messages)+settings.model_max_output_tokens
         claim_token_reservation(estimate)
         counter['dispatched']=dispatched+1

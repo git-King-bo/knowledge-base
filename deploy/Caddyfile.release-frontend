@@ -1,0 +1,20 @@
+# 每个版本自己的前端同时代理该版本的 API，避免灰度时前后端混用。
+:8080 {
+    handle /api/* {
+        reverse_proxy {$API_UPSTREAM} {
+            flush_interval -1
+        }
+    }
+    handle /ready {
+        reverse_proxy {$API_UPSTREAM}
+    }
+    handle /health {
+        reverse_proxy {$API_UPSTREAM}
+    }
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        header Cache-Control "no-cache"
+        file_server
+    }
+}

@@ -10,3 +10,7 @@
 **/*.db-wal
 **/__pycache__
 deploy/production.env
+data
+releases
+deploy/.credentials
+backend/tests

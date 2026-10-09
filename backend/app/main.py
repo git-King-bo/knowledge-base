@@ -25,7 +25,8 @@ def create_app() -> FastAPI:
         if settings.worker_enabled:
             worker.start()
         yield
-        worker.close()
+        # 发布切换时给在途导入任务留出退出时间，Docker 的停止期限为 300 秒。
+        worker.close(wait_seconds=285 if settings.app_env == 'production' else 2)
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
@@ -58,7 +59,7 @@ def create_app() -> FastAPI:
                 db.execute(text("SELECT 1"))
             from pathlib import Path
             worker = getattr(app.state, "import_worker", None)
-            if settings.worker_enabled and worker and worker.thread and not worker.thread.is_alive():
+            if settings.worker_enabled and (not worker or not worker.thread or not worker.thread.is_alive()):
                 raise RuntimeError("Import worker unavailable")
             if not Path(settings.upload_dir).is_dir():
                 raise RuntimeError("Upload directory unavailable")

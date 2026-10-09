@@ -1,5 +1,5 @@
 export type TalentQueryState = { knowledge_base_id: string | null; query: string; plan: Record<string, unknown>;
-  offset: number; page_size: number; returned: number; has_more: boolean }
+  snapshot_id?: string | null; offset: number; page_size: number; returned: number; has_more: boolean }
 export type ConversationContext = { question: string; answer: string; query_state?: TalentQueryState }
 
 /** Preserve complete pairs and the most recent context within the API budget. */

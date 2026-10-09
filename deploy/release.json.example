@@ -1,0 +1,6 @@
+{
+  "version": "sha-0123456789ab",
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "backend": "ghcr.io/git-king-bo/knowledge-base/backend@sha256:REPLACE_WITH_64_HEX_DIGEST",
+  "frontend": "ghcr.io/git-king-bo/knowledge-base/frontend@sha256:REPLACE_WITH_64_HEX_DIGEST"
+}

@@ -186,8 +186,8 @@ class Worker:
             except Exception:
                 log.exception('worker_iteration_failed')
             self.stop.wait(1)
-    def close(self):
+    def close(self, wait_seconds=2):
         self.stop.set()
-        if self.thread:self.thread.join(timeout=2)
+        if self.thread:self.thread.join(timeout=wait_seconds)
         # File lock remains held until the active worker exits or process terminates.
         if self.lock_file and (not self.thread or not self.thread.is_alive()):self.lock_file.close()
