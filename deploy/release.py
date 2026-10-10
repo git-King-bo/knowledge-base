@@ -60,6 +60,16 @@ def atomic_json(path, value):
     os.replace(str(temporary), str(path))
 
 
+def acquire_release_lock(lock, action):
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        if action == 'status':
+            return False
+        raise RuntimeError('Another release operation is still running. Check status before retrying; no new deployment was started.')
+
+
 def validate_manifest(value, local=False):
     if set(value) != {'version', 'commit', 'backend', 'frontend'}:
         raise ValueError('Manifest must contain version, commit, backend, frontend only')
@@ -397,7 +407,7 @@ def main():
     args = parser.parse_args()
     deploy = Releases(args.root)
     with (deploy.directory / '.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        locked = acquire_release_lock(lock, args.action)
         # 获取锁后重新读取状态，避免等锁期间状态已被另一个发布更新。
         deploy = Releases(args.root)
         if deploy.journal.exists() and args.action not in ('recover', 'status'):
@@ -423,6 +433,7 @@ def main():
             public = {k: v for k, v in deploy.state.items() if k != 'token'}
             public['versions'] = sorted(p.parent.name for p in deploy.directory.glob('*/manifest.json'))
             public['recovery_required'] = deploy.journal.exists()
+            public['operation_in_progress'] = not locked
             print(json.dumps(public, indent=2))
         else:
             getattr(deploy, args.action)()

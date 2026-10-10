@@ -11,6 +11,12 @@ spec.loader.exec_module(r)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_busy_release_reports_status_but_rejects_second_deployment(self):
+        with patch.object(r.fcntl,'flock',side_effect=BlockingIOError):
+            self.assertFalse(r.acquire_release_lock(Mock(),'status'))
+            with self.assertRaisesRegex(RuntimeError,'still running'):
+                r.acquire_release_lock(Mock(),'bootstrap')
+
     def test_slow_image_pull_reports_progress(self):
         process=Mock(returncode=0)
         process.communicate.side_effect=[r.subprocess.TimeoutExpired('docker',30),('done','')]
