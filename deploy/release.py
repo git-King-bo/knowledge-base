@@ -71,8 +71,9 @@ def acquire_release_lock(lock, action):
 
 
 def validate_manifest(value, local=False):
-    if set(value) != {'version', 'commit', 'backend', 'frontend'}:
-        raise ValueError('Manifest must contain version, commit, backend, frontend only')
+    if set(value) not in ({'version', 'commit', 'backend', 'frontend'},
+                          {'version', 'commit', 'backend', 'frontend', 'image_ids'}):
+        raise ValueError('Manifest requires version, commit, backend, frontend; image_ids is optional')
     if not VERSION.fullmatch(value['version']):
         raise ValueError('Invalid version')
     if not re.fullmatch(r'[a-f0-9]{40}', value['commit']):
@@ -82,7 +83,17 @@ def validate_manifest(value, local=False):
         match = IMAGE.fullmatch(ref)
         if not (match and match.group(1) == role) and not (local and LOCAL_IMAGE.fullmatch(ref)):
             raise ValueError('Image must use an approved repository and immutable digest')
+    if 'image_ids' in value:
+        ids = value['image_ids']
+        if not isinstance(ids, dict) or set(ids) != {'backend', 'frontend'}:
+            raise ValueError('Both offline image IDs are required')
+        if any(not isinstance(i, str) or not LOCAL_IMAGE.fullmatch(i) for i in ids.values()):
+            raise ValueError('Offline images must use immutable image IDs')
     return value
+
+
+def image_reference(manifest, role):
+    return manifest.get('image_ids', {}).get(role, manifest[role])
 
 
 class Releases:
@@ -112,15 +123,23 @@ class Releases:
         value = validate_manifest(json.loads(Path(path).read_text()), local)
         directory = self.directory / value['version']
         if directory.exists():
-            if self.manifest(value['version']) != value:
+            existing = self.manifest(value['version'])
+            source = lambda item: {k: v for k, v in item.items() if k != 'image_ids'}
+            if source(existing) != source(value):
                 raise RuntimeError('Version already exists with different image digests')
+            if 'image_ids' in existing and 'image_ids' in value and existing['image_ids'] != value['image_ids']:
+                raise RuntimeError('Version already exists with different image IDs')
             return value['version']
         for role in ('backend', 'frontend'):
-            ref = value[role]
+            ref = image_reference(value, role)
             if not LOCAL_IMAGE.fullmatch(ref):
-                pull_image(ref)
+                try:
+                    run('docker', 'image', 'inspect', ref)
+                    print('Using cached image: ' + ref, flush=True)
+                except subprocess.CalledProcessError:
+                    pull_image(ref)
             info = json.loads(run('docker', 'image', 'inspect', ref))[0]
-            if info['Architecture'] != 'amd64':
+            if info['Architecture'] != 'amd64' or info.get('Os', 'linux') != 'linux':
                 raise RuntimeError('ECS requires linux/amd64 images')
         import tempfile
         draft = Path(tempfile.mkdtemp(prefix='.register-', dir=str(self.directory)))
@@ -174,10 +193,10 @@ class Releases:
             args += ['--memory', '640m'] + self.backend_args(version, worker=role == 'worker')
             args += ['--health-cmd', "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready',timeout=5)\"",
                      '--health-interval', '15s', '--health-timeout', '10s', '--health-start-period', '30s',
-                     manifest['backend']]
+                     image_reference(manifest, 'backend')]
         else:
             args += ['--memory', '96m', '-e', 'API_UPSTREAM=' + self.name('api', version) + ':8001',
-                     manifest['frontend']]
+                     image_reference(manifest, 'frontend')]
         run(*args)
 
     def healthy(self, version, role='api'):
@@ -195,7 +214,7 @@ class Releases:
         # 即使旧容器仍健康，也重新检查目标镜像与当前数据库是否匹配。
         # 这会拒绝跨 schema 版本回滚，并且不会自动 upgrade/downgrade。
         run(*(['docker', 'run', '--rm', '--network', self.network] + self.backend_args(version) +
-              [self.manifest(version)['backend'], 'python', '-c',
+              [image_reference(self.manifest(version), 'backend'), 'python', '-c',
                'from app.db.session import engine; from alembic.config import Config; '
                'from alembic.script import ScriptDirectory; '
                'from alembic.runtime.migration import MigrationContext; '

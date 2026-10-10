@@ -13,6 +13,8 @@ GitHub main / v* 标签 / 手动构建
   → 后端与前端测试、发布安全测试
   → 构建 linux/amd64 前后端镜像
   → GHCR 保存镜像，产出 release.json（镜像 digest）
+  → Deploy runner 按 digest 拉取镜像，查询 ECS 的本地镜像 ID 缓存
+  → 缺少的镜像 gzip 压缩，经受限 SSH 传输、SHA-256 校验、docker load
   → 人工触发 stage：新旧版本并行，仅测试浏览器进入新版
   → 验收通过后 promote：切换正式入口和单例后台任务
   → 有问题 rollback：重新启动指定历史版本并切换入口
@@ -35,10 +37,30 @@ GitHub main / v* 标签 / 手动构建
 
 专用密钥已限制为 `kb-release` 发布动作，禁止交互式 Shell、任意命令与 SSH 转发；它不是日常 root 登录密钥。`deploy/.credentials/` 同时被 Git 和 Docker 构建上下文忽略。服务器强制入口是 `deploy/ssh-release.py`，不要给它普通 Shell 授权。
 
-4. 查看仓库 Actions 设置，允许当前工作流运行。Build 工作流只请求 `contents: read` 和 `packages: write`；Deploy 只请求读取镜像和构建产物。GHCR 包应保持 **Private**，并允许本仓库的 Actions 访问。发布使用任务临时 `GITHUB_TOKEN` 拉取镜像，服务器不长期保存 GHCR Token。
+4. 查看仓库 Actions 设置，允许当前工作流运行。Build 工作流只请求 `contents: read` 和 `packages: write`；Deploy 只请求读取镜像和构建产物。GHCR 包应保持 **Private**，并允许本仓库的 Actions 访问。发布使用任务临时 `GITHUB_TOKEN` 在 GitHub runner 拉取镜像；新工作流不再把 GHCR Token 发给 ECS，也不要求 ECS 连接 GHCR。
 5. 首次 Build 完成后，在运行 Summary 记录版本号与 Run ID。版本格式类似 `sha-0123456789ab-r123456789-a1`，含源码提交及构建次数；实际发布固定 digest，不使用 `latest`。同一版本号不允许改成另一组镜像。
 
 参考：[GitHub 镜像发布](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images)、[环境保护规则](https://docs.github.com/en/actions/concepts/workflows-and-actions/deployment-environments)。
+
+## 镜像下载超时后的传输升级（2026-10-10）
+
+新工作流使用现有 SSH 通道传输镜像，不需要 ACR 或新增 Secrets。镜像在 runner 上按原始 GHCR digest 拉取并记录 linux/amd64 image ID；服务器校验传输包 SHA-256，导入后按不可变 image ID 启动。发布清单同时保存原仓库 digest 和 image ID。历史四字段清单继续兼容，灰度、promote、rollback 仍使用原有控制器。
+
+**启用顺序：先更新服务器工具，再推送新工作流。** 单独重跑旧 Actions 仍会直接连接 GHCR。使用日常管理员 SSH（不能用 CI 的受限密钥）备份并同步以下三个文件到 `/opt/knowledge-base/deploy/`：
+
+- `release.py`
+- `ssh-release.py`
+- `image-transfer.py`（新增）
+
+保持服务器原有属主及权限。三个文件全部更新后再运行新 Deploy 工作流；同步工具本身不切换站点。不要同时运行旧部署。CI 专用密钥保持 forced-command，不开放 Shell/SCP。入口仅增加 `image-status`、`image-import`、`stage-offline` 和 `bootstrap-offline` 四个受限协议命令。
+
+服务器已有的完整 image ID 会跳过传输；缺少的镜像每个导出为 gzip 包，经 SSH 传入服务器临时目录，导入后删除临时包。首次仍要传完整镜像，修改后的镜像也需要传完整压缩包，尚不提供差分传输或断点续传。完成导入的镜像在重试时可复用。需要为临时压缩包和 Docker 导入保留磁盘空间。
+
+日志显示传输 MiB、校验及导入阶段；单个传输/导入最多 10 分钟，runner 单个镜像拉取最多 5 分钟。断流、校验失败、导入失败或缺少预期 image ID 都会终止，尚未进入版本注册和流量切换。新链路避免 ECS 直接从 GHCR 下载，但实际速度仍取决于 runner 到 ECS 的带宽。
+
+不要清理历史镜像（包括通过 ID 导入、无标签的镜像），否则历史版本可能无法回滚。
+
+本地验证新协议：`python3 deploy/tests/integration_image_transfer.py`。该测试只创建并清理一个临时小镜像，不访问生产环境。
 
 ## 第一次接管当前网站
 
@@ -49,7 +71,7 @@ GitHub main / v* 标签 / 手动构建
 - version：复制 Build Summary 的完整版本号
 - build_run_id：复制对应构建 Run ID
 
-工具会拉取已构建镜像，检查数据库版本、启动新接口和前端、备份数据，再接管现有 Caddy 路由和后台任务。原后端容器停止但不删除；接管前 Caddy 配置保存在 `releases/legacy-Caddyfile`。确认首页、登录、资料预览、聊天、导入均正常后，这一版就成为后续回滚的初始版本。
+工具会在 runner 拉取已构建镜像并通过 SSH 传入 ECS，检查数据库版本、启动新接口和前端、备份数据，再接管现有 Caddy 路由和后台任务。原后端容器停止但不删除；接管前 Caddy 配置保存在 `releases/legacy-Caddyfile`。确认首页、登录、资料预览、聊天、导入均正常后，这一版就成为后续回滚的初始版本。
 
 bootstrap 不允许在已接管后再次运行，后续发布都使用 stage/promote。
 

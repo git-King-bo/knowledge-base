@@ -13,6 +13,30 @@ ROOT = Path('/opt/knowledge-base')
 
 def main():
     command = os.environ.get('SSH_ORIGINAL_COMMAND', '')
+    if command in ('kb-release image-status', 'kb-release image-import'):
+        subprocess.run(['python3', '-u', str(ROOT / 'deploy/image-transfer.py'),
+                        command.split()[1]], check=True)
+        return
+    offline = re.fullmatch(r'kb-release (bootstrap|stage)-offline ([a-z0-9][a-z0-9.-]{0,39})', command)
+    if offline:
+        from release import validate_manifest
+        action, version = offline.groups()
+        raw = sys.stdin.read(65537)
+        if len(raw) > 65536:
+            raise ValueError('Payload too large')
+        value = validate_manifest(json.loads(raw))
+        if value['version'] != version or 'image_ids' not in value:
+            raise ValueError('Offline manifest mismatch')
+        with tempfile.TemporaryDirectory(prefix='kb-offline-') as folder:
+            manifest = Path(folder) / 'manifest.json'
+            manifest.write_text(json.dumps(value))
+            controller = ['python3', '-u', str(ROOT / 'deploy/release.py')]
+            subprocess.run(controller + [action if action == 'bootstrap' else 'register',
+                                         str(manifest)], check=True)
+            if action == 'stage':
+                subprocess.run(controller + ['retire'], check=True)
+                subprocess.run(controller + ['stage', version], check=True)
+        return
     match = re.fullmatch(r'kb-release (bootstrap|stage|promote|rollback|abort|status|retire)(?: ([a-z0-9][a-z0-9.-]{0,39}))?', command)
     if not match:
         raise ValueError('Only kb-release deployment commands are permitted')

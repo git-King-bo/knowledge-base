@@ -26,9 +26,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
-    # Each of the two first-time image downloads is bounded to 30 minutes.
-    # Leave additional time for health checks, backups, and worker draining.
-    timeout-minutes: 75
+    # Pull on the runner, then transfer only missing images over restricted SSH.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Validate inputs
@@ -53,33 +52,17 @@ jobs:
           path: release-artifact
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.build_run_id }}
-      - name: Execute restricted deployment command
+      - name: Log in to GHCR on runner
+        if: inputs.action == 'stage' || inputs.action == 'bootstrap'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Transfer images and execute restricted deployment command
         env:
           ACTION: ${{ inputs.action }}
           VERSION: ${{ inputs.version }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REGISTRY_USER: ${{ github.actor }}
-        run: |
-          python - <<'PY'
-          import json, os, pathlib, subprocess, tempfile
-          e=os.environ
-          with tempfile.TemporaryDirectory() as folder:
-            key=pathlib.Path(folder)/'key'; hosts=pathlib.Path(folder)/'known_hosts'
-            key.write_text(e['DEPLOY_SSH_KEY']+'\n'); key.chmod(0o600)
-            hosts.write_text(e['DEPLOY_KNOWN_HOSTS']+'\n')
-            command='kb-release '+e['ACTION']
-            if e['ACTION'] in ('bootstrap','stage','promote','rollback'):
-              command+=' '+e['VERSION']
-            payload=''
-            if e['ACTION'] in ('bootstrap','stage'):
-              manifest=json.loads(pathlib.Path('release-artifact/release.json').read_text())
-              assert manifest['version']==e['VERSION'], 'Artifact version mismatch'
-              payload=json.dumps(dict(manifest=manifest, registry_user=e['REGISTRY_USER'], registry_token=e['REGISTRY_TOKEN']))
-            args=['ssh','-T','-i',str(key),'-o','IdentitiesOnly=yes','-o','BatchMode=yes',
-              '-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(hosts),'-o','ConnectTimeout=20',
-              '-o','ServerAliveInterval=15','-o','ServerAliveCountMax=20',
-              'root@120.27.205.41',command]
-            subprocess.run(args,input=payload,text=True,check=True)
-          PY
+        run: python deploy/send-release.py
