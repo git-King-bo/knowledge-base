@@ -77,7 +77,7 @@ onUnmounted(() => window.removeEventListener('hashchange', readHash))
     <aside class="sidebar">
       <a class="brand" href="#knowledge">
 <FairyIcon name="spark" :size="48" portrait />
-<span>知序-1<span class="brand-en">A LITTLE KNOWLEDGE MAGIC</span>
+<span>知序<span class="brand-en">A LITTLE KNOWLEDGE MAGIC</span>
 </span>
 </a>
       <div class="workspace-switch">

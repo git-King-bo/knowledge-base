@@ -66,7 +66,7 @@ async function login() {
     <header class="login-header" :inert="entering || undefined">
       <div class="login-brand" aria-label="知序知识库">
         <svg class="login-mark" viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M20 4 35 12.5V27L20 36 5 27V12.5L20 4Z" stroke="currentColor" /><path d="m5 12.5 15 9 15-9M20 21.5V36m-7.5-27.7 15 8.7v14.5" stroke="currentColor" /></svg>
-        <span>知序</span>
+        <span>知序-1</span>
       </div>
       <button class="motion-toggle" type="button" :aria-pressed="motionPaused" :disabled="reducedMotion"
         :aria-label="reducedMotion ? '已跟随系统减少动态效果' : paused ? '播放背景动效' : '暂停背景动效'" @click="paused = !paused">
