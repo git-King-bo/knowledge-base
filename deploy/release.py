@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -96,6 +97,36 @@ def image_reference(manifest, role):
     return manifest.get('image_ids', {}).get(role, manifest[role])
 
 
+def docker_environment(source):
+    """Convert our single-line, optionally shell-quoted snapshots to Docker syntax.
+
+    No shell evaluation or variable expansion; never include values in errors.
+    """
+    result = []
+    for number, raw in enumerate(source.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        key, separator, value = line.partition('=')
+        key, value = key.strip(), value.strip()
+        if not separator or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
+            raise ValueError('Invalid environment assignment at line {}'.format(number))
+        if value.startswith(('"', "'")):
+            try:
+                parts = shlex.split(value, comments=True, posix=True)
+            except ValueError:
+                raise ValueError('Invalid quoted environment value at line {}'.format(number)) from None
+            if len(parts) != 1:
+                raise ValueError('Expected one environment value at line {}'.format(number))
+            value = parts[0]
+        else:
+            value = re.split(r'\s+#', value, maxsplit=1)[0].rstrip()
+        if any(char in value for char in ('\n', '\r', '\0')):
+            raise ValueError('Multiline environment values are not supported')
+        result.append(key + '=' + value)
+    return '\n'.join(result) + '\n'
+
+
 class Releases:
     def __init__(self, root):
         self.root = root.resolve()
@@ -169,7 +200,16 @@ class Releases:
             run('docker', 'rm', name)
 
     def backend_args(self, version, worker=False):
-        return ['--env-file', str(self.directory / version / 'runtime.env'),
+        directory = self.directory / version
+        # Keep the immutable source snapshot; Docker does not remove .env quotes.
+        content = docker_environment((directory / 'runtime.env').read_text())
+        target = directory / 'docker.env'
+        temporary = directory / 'docker.env.tmp'
+        with open(str(temporary), 'w', opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
+            output.write(content)
+        temporary.chmod(0o600)
+        os.replace(str(temporary), str(target))
+        return ['--env-file', str(target),
                 '-e', 'APP_ENV=production', '-e', 'APP_AUTH_ENABLED=true',
                 # 灰度共享一套 MySQL；禁止某个实例静默回退到独立 SQLite。
                 '-e', 'APP_DATABASE_MODE=mysql', '-e', 'APP_MIGRATION_MODE=check',

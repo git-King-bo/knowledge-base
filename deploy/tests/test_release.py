@@ -118,11 +118,39 @@ class ReleaseTests(unittest.TestCase):
         self.assertIsNone(deploy.state['candidate'])
 
     def test_runtime_always_uses_shared_mysql_and_check_only_migrations(self):
+        directory = self.release.directory / 'new'
+        directory.mkdir()
+        source = "APP_PORT='8001'\nWEB_SEARCH_ENABLED='true'\n"
+        (directory / 'runtime.env').write_text(source)
         args=self.release.backend_args('new')
+        self.assertEqual((directory / 'runtime.env').read_text(), source)
+        self.assertEqual((directory / 'docker.env').read_text(), 'APP_PORT=8001\nWEB_SEARCH_ENABLED=true\n')
+        self.assertEqual((directory / 'docker.env').stat().st_mode & 0o777, 0o600)
         self.assertIn('APP_DATABASE_MODE=mysql',args)
         self.assertIn('APP_MIGRATION_MODE=check',args)
         self.assertIn('APP_WORKER_ENABLED=false',args)
         self.assertIn('APP_WORKER_ENABLED=true',self.release.backend_args('new',worker=True))
+
+    def test_docker_env_preserves_literal_secrets_and_removes_syntax_quotes(self):
+        source = '''# comment
+PORT='13306'
+BOOL="true"
+SECRET='a $HOME # b=c'
+EMPTY=''
+RAW=a=b#c
+SPACES=" leading and trailing " # comment
+'''
+        self.assertEqual(r.docker_environment(source),
+                         'PORT=13306\nBOOL=true\nSECRET=a $HOME # b=c\nEMPTY=\nRAW=a=b#c\nSPACES= leading and trailing \n')
+        import shlex
+        secret = "apostrophe's $literal \\ slash"
+        self.assertEqual(r.docker_environment('SECRET=' + shlex.quote(secret)), 'SECRET=' + secret + '\n')
+
+    def test_invalid_env_errors_never_expose_values(self):
+        for source in ("SECRET='sensitive", "SECRET='sensitive' extra", 'invalid sensitive', 'SECRET=sensitive\0'):
+            with self.assertRaises(ValueError) as error:
+                r.docker_environment(source)
+            self.assertNotIn('sensitive', str(error.exception))
 
     def test_abort_keeps_active_worker_and_database(self):
         deploy=self.release
