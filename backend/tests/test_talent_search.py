@@ -48,8 +48,9 @@ class TalentSearchTests(unittest.TestCase):
         self.assertEqual(result['matched_records'], 5)
         self.assertEqual(result['missing_sort_values'], 2)
         self.assertEqual(result['rankable_records'], 3)
-        self.assertEqual([record['fields']['姓名'] for record in result['records']], ['乙', '甲', '丁'])
-        self.assertEqual([record['excel_row'] for record in result['records']], [3, 2, 5])
+        self.assertEqual([record['fields']['姓名'] for record in result['records']][:3], ['乙', '甲', '丁'])
+        self.assertEqual([record['excel_row'] for record in result['records']][:3], [3, 2, 5])
+        self.assertEqual(len(result['records']), 5)
         ascending = execute_plan(TalentPlan(filters=plan.filters, sort_by='OpenAlex h-index', descending=False, limit=1), sheets)[0]
         self.assertEqual(ascending['records'][0]['fields']['姓名'], '丁')
         self.assertTrue(ascending['truncated'])
@@ -66,7 +67,7 @@ class TalentSearchTests(unittest.TestCase):
         self.assertEqual(result['matched_records'], 1)
         self.assertEqual(result['records'][0]['fields']['姓名'], '乙')
         invalid = TalentPlan(filters=[TalentFilter(field='虚构指标', value='1')])
-        self.assertIn('无法可靠确定', talent_context(question, sources, lambda schema: invalid.model_dump_json()))
+        self.assertIn('查询计划未通过结构或字段校验', talent_context(question, sources, lambda schema: invalid.model_dump_json()))
         self.assertIsNone(rule_plan('具身智能按h-index排名', sheets))
 
     def test_ask_and_stream_receive_structured_evidence_even_when_retrieval_empty(self):
@@ -162,8 +163,9 @@ class TalentSearchTests(unittest.TestCase):
         self.assertIn('Google Scholar h-index', ambiguous)
         self.assertIn('OpenAlex h-index', ambiguous)
         unknown = talent_context('推荐适合这个项目的人才', sources, lambda schema: '{}')
-        self.assertIn('推荐适合这个项目的人才', unknown)
-        self.assertIn('不表示知识库没有相关数据', unknown)
+        self.assertIn('模型返回的查询计划未通过', unknown)
+        self.assertNotIn('拆成单一查询', unknown)
+        self.assertIn('不表示知识库没有相关人才', unknown)
         self.assertNotIn('前20名', unknown)
 
     def test_aggregate_preserves_filters_and_rejects_incomplete_sources(self):

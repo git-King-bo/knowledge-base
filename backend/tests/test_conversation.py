@@ -1,3 +1,4 @@
+from app.core.config import settings
 import io
 import json
 import unittest
@@ -166,6 +167,7 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(chat.call_count, 1)
         talent.assert_not_called()
 
+    @patch.object(settings, 'talent_fast_search', False)  # Legacy strict-query contract
     def test_ranking_followup_includes_people_outside_previous_five(self):
         base = self.base()
         workbook = Workbook()

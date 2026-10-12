@@ -1,0 +1,242 @@
+[
+  {
+    "id": "add_subject",
+    "question": "再加一项：关注可降解聚合物。",
+    "previous": {
+      "evidence_conditions": [
+        "当前在巴西工作"
+      ],
+      "topic_condition": "",
+      "sort_by": "影响力指标"
+    },
+    "fields": [
+      "姓名",
+      "当前机构",
+      "当前职务",
+      "详细个人简介",
+      "研究方向",
+      "教育经历",
+      "所在国家／城市",
+      "影响力指标"
+    ],
+    "expected": {
+      "retain": [
+        0
+      ],
+      "contains": [
+        "聚合物"
+      ],
+      "sort_by": "影响力指标"
+    }
+  },
+  {
+    "id": "remove_location",
+    "question": "人在哪里都行，研究方向照旧。",
+    "previous": {
+      "evidence_conditions": [
+        "当前在巴西工作",
+        "量子传感"
+      ],
+      "topic_condition": "量子传感",
+      "sort_by": "影响力指标"
+    },
+    "fields": [
+      "姓名",
+      "当前机构",
+      "当前职务",
+      "详细个人简介",
+      "研究方向",
+      "教育经历",
+      "所在国家／城市",
+      "影响力指标"
+    ],
+    "expected": {
+      "remove": [
+        0
+      ],
+      "topic": "量子传感",
+      "sort_by": "影响力指标"
+    }
+  },
+  {
+    "id": "replace_location",
+    "question": "希望地点落在德国，其他要求照旧。",
+    "previous": {
+      "evidence_conditions": [
+        "当前在巴西工作",
+        "海洋观测"
+      ],
+      "topic_condition": "海洋观测",
+      "sort_by": "影响力指标"
+    },
+    "fields": [
+      "姓名",
+      "当前机构",
+      "当前职务",
+      "详细个人简介",
+      "研究方向",
+      "教育经历",
+      "所在国家／城市",
+      "影响力指标"
+    ],
+    "expected": {
+      "remove": [
+        0
+      ],
+      "contains": [
+        "德国"
+      ],
+      "topic": "海洋观测",
+      "sort_by": "影响力指标"
+    }
+  },
+  {
+    "id": "intersect_subject",
+    "question": "还得懂气候建模。",
+    "previous": {
+      "evidence_conditions": [
+        "有企业研发经历",
+        "遥感"
+      ],
+      "topic_condition": "遥感",
+      "sort_by": "影响力指标"
+    },
+    "fields": [
+      "姓名",
+      "当前机构",
+      "当前职务",
+      "详细个人简介",
+      "研究方向",
+      "教育经历",
+      "所在国家／城市",
+      "影响力指标"
+    ],
+    "expected": {
+      "retain": [
+        0
+      ],
+      "contains": [
+        "遥感",
+        "气候"
+      ],
+      "sort_by": "影响力指标"
+    }
+  },
+  {
+    "id": "replace_subject",
+    "question": "研究方向以催化为准，地点和排序照旧。",
+    "previous": {
+      "evidence_conditions": [
+        "当前在巴西工作",
+        "遥感"
+      ],
+      "topic_condition": "遥感",
+      "sort_by": "影响力指标"
+    },
+    "fields": [
+      "姓名",
+      "当前机构",
+      "当前职务",
+      "详细个人简介",
+      "研究方向",
+      "教育经历",
+      "所在国家／城市",
+      "影响力指标"
+    ],
+    "expected": {
+      "retain": [
+        0
+      ],
+      "remove": [
+        1
+      ],
+      "topic": "催化",
+      "sort_by": "影响力指标"
+    }
+  },
+  {
+    "id": "negated_removal",
+    "question": "别理解成取消地点要求，只是在原范围里增加遥感方向。",
+    "previous": {
+      "evidence_conditions": [
+        "当前在巴西工作"
+      ],
+      "topic_condition": "",
+      "sort_by": "影响力指标"
+    },
+    "fields": [
+      "姓名",
+      "当前机构",
+      "当前职务",
+      "详细个人简介",
+      "研究方向",
+      "教育经历",
+      "所在国家／城市",
+      "影响力指标"
+    ],
+    "expected": {
+      "retain": [
+        0
+      ],
+      "contains": [
+        "遥感"
+      ],
+      "sort_by": "影响力指标"
+    }
+  },
+  {
+    "id": "ambiguous_reference",
+    "question": "这个不要了。",
+    "previous": {
+      "evidence_conditions": [
+        "当前在巴西工作",
+        "有企业研发经历",
+        "声学"
+      ],
+      "topic_condition": "声学",
+      "sort_by": "影响力指标"
+    },
+    "fields": [
+      "姓名",
+      "当前机构",
+      "当前职务",
+      "详细个人简介",
+      "研究方向",
+      "教育经历",
+      "所在国家／城市",
+      "影响力指标"
+    ],
+    "expected": {
+      "clarify": true
+    }
+  },
+  {
+    "id": "english_reset",
+    "question": "Let's treat this as a separate search: coastal ecology, irrespective of all prior criteria.",
+    "previous": {
+      "evidence_conditions": [
+        "当前在巴西工作",
+        "声学"
+      ],
+      "topic_condition": "声学",
+      "sort_by": "影响力指标"
+    },
+    "fields": [
+      "姓名",
+      "当前机构",
+      "当前职务",
+      "详细个人简介",
+      "研究方向",
+      "教育经历",
+      "所在国家／城市",
+      "影响力指标"
+    ],
+    "expected": {
+      "remove": [
+        0,
+        1
+      ],
+      "sort_by": null
+    }
+  }
+]

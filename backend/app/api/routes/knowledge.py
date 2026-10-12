@@ -321,18 +321,25 @@ async def upload_knowledge_file(
     return await _ingest_upload(file=file, repo=repo)
 
 
-def _talent_query_planner(db, question, provider, api_key, model, knowledge_base_id, request_context=None):
+def _talent_query_planner(db, question, provider, api_key, model, knowledge_base_id, request_context=None, *, fast_search=None):
     ai_repo = AIRepository(db)
+    fast = settings.talent_fast_search if fast_search is None else fast_search
     @traced('人才查询规划')
     def plan_talent_query(schema):
         if schema.get('phase') == 'verify_candidates':
             from app.services.talent_evidence import verification_instructions
             instructions = verification_instructions(len(schema['conditions']))
             schema = {**schema, 'candidates': [{'id':item['id'],'passages':item['passages']} for item in schema['candidates']]}
+        elif schema.get('phase') == 'review_context_update':
+            from app.services.talent_context_update import review_instructions
+            instructions = review_instructions()
         else:
             instructions = query_planner_instructions()
-        request_data={"question":question,"schema":schema}
-        if request_context and schema.get('phase')!='verify_candidates':
+            if fast:
+                from app.services.talent_search_schema import fast_query_instructions
+                instructions = fast_query_instructions()
+        request_data={"question":schema.get('question',question),"schema":schema}
+        if request_context and schema.get('phase') not in {'verify_candidates','review_context_update'}:
             request_data['request_context']=request_context
         messages = [ChatMessage(role="system", content=instructions),
                     ChatMessage(role="user", content=json.dumps(request_data, ensure_ascii=False))]
@@ -358,6 +365,12 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
                 knowledge_base_id=knowledge_base_id, success=result is not None,
                 latency_ms=int((perf_counter() - started) * 1000))
 
+    plan_talent_query.previous_plan=(request_context or {}).get('previous_plan')
+    plan_talent_query.review_context=plan_talent_query
+    plan_talent_query.original_question=(request_context or {}).get('original_question',question)
+    plan_talent_query.fast_search = fast
+    plan_talent_query.search_db = db
+    plan_talent_query.search_base = knowledge_base_id
     adapter = ai_provider_registry.resolve(provider.provider)
     from app.core.security import actor
     import hashlib
@@ -385,7 +398,7 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
                     response_text=result.content if result else model_error_message(error),
                     usage=result.usage if result else None,knowledge_base_id=knowledge_base_id,
                     success=result is not None,latency_ms=latency)
-            trace_note('并行核验调度', batches=len(messages_batch), concurrency=2, budget_reserved_before_dispatch=True)
+            trace_note('并行核验调度', batches=len(messages_batch), concurrency=len(messages_batch), budget_reserved_before_dispatch=True)
             return run_model_batch(adapter,provider,messages_batch,model or provider.default_model,api_key,record)
         plan_talent_query.batch=batch
     return plan_talent_query
@@ -472,8 +485,9 @@ def _prepare_ask(payload: AskRequest, db: Session):
     sort_fields=sorted({field for group in previous_result['results'] for row in group.get('records',[])
                         for field in row['fields']}) if previous_result else None
     result_action={}
-    combined_planning = bool(settings.talent_combined_planning and talent_sources and previous_state
-                             and not page_state and not payload.continuation and not sort_fields)
+    fast_search=settings.talent_fast_search and payload.talent_search_mode=='search'
+    combined_planning = bool(talent_sources and not page_state and not payload.continuation and
+        (fast_search or (settings.talent_combined_planning and previous_state and not sort_fields)))
     if combined_planning:
         retrieval_query = payload.question
         trace_note('理解追问与查询改写', status='skipped', reason='与人才查询规划合并；保留上一轮完整条件计划')
@@ -484,8 +498,10 @@ def _prepare_ask(payload: AskRequest, db: Session):
     plan_talent_query = _talent_query_planner(db, retrieval_query, provider, api_key, payload.model, payload.knowledge_base_id,
         request_context={'original_question':payload.question,
                          'previous_question':history[-1].question if history else None,
-                         'previous_plan':history[-1].query_state.plan if history and history[-1].query_state else None})
-    plan_talent_query.requires_context = combined_planning
+                         'previous_questions':[turn.question for turn in history] if not previous_state else [],
+                         'previous_plan':history[-1].query_state.plan if history and history[-1].query_state else None},
+        fast_search=fast_search)
+    plan_talent_query.requires_context = bool(getattr(plan_talent_query,'previous_plan',None))
     from app.services.talent_hybrid import hybrid_talents
     try:
         with trace_stage('人才结构化检索'):

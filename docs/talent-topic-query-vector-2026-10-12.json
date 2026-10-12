@@ -1,0 +1,148 @@
+[
+  {
+    "iteration": 1,
+    "query": "查找托卡马克领域人才",
+    "model": "qwen3.8-27b",
+    "elapsed_ms": 6132,
+    "model_calls": 1,
+    "returned": 2,
+    "names": [
+      "谭熠",
+      "陈锐"
+    ],
+    "plan": {
+      "intent": "filter",
+      "operation": null,
+      "field": null,
+      "message": "",
+      "filters": [],
+      "concepts": [],
+      "evidence_conditions": [
+        "托卡马克领域人才"
+      ],
+      "topic_condition": "托卡马克领域人才",
+      "sort_by": null,
+      "descending": true,
+      "limit": 20,
+      "result_limit": null,
+      "match_all": false,
+      "context_update": {
+        "reset": false,
+        "remove_conditions": [],
+        "remove_filters": [],
+        "clear_sort": false,
+        "clear_limit": false,
+        "clear_topic": false,
+        "topic_action": "add",
+        "assignments": {},
+        "evidence": ""
+      },
+      "search": {
+        "predicates": [
+          {
+            "condition": "托卡马克领域人才",
+            "kind": "topic",
+            "fields": [
+              "领域",
+              "细分关键词"
+            ],
+            "op": "contains_any",
+            "values": [
+              "托卡马克"
+            ],
+            "related_values": []
+          }
+        ],
+        "topic_mode": "all"
+      }
+    },
+    "retrieval": {
+      "mode": "BM25",
+      "vector_status": "unavailable",
+      "dense_covered_people": 906,
+      "eligible_people": 906,
+      "lexical_candidates": 2,
+      "dense_candidates": 0,
+      "candidate_limit": 60,
+      "rerank": "not_configured",
+      "admission": "direct_topic_evidence",
+      "direct_candidates": 2,
+      "unsupported_candidates": 0
+    },
+    "unresolved": [],
+    "matched": 2
+  },
+  {
+    "iteration": 2,
+    "query": "查找托卡马克领域人才",
+    "model": "qwen3.8-27b",
+    "elapsed_ms": 2415,
+    "model_calls": 0,
+    "returned": 2,
+    "names": [
+      "谭熠",
+      "陈锐"
+    ],
+    "plan": {
+      "intent": "filter",
+      "operation": null,
+      "field": null,
+      "message": "",
+      "filters": [],
+      "concepts": [],
+      "evidence_conditions": [
+        "托卡马克领域人才"
+      ],
+      "topic_condition": "托卡马克领域人才",
+      "sort_by": null,
+      "descending": true,
+      "limit": 20,
+      "result_limit": null,
+      "match_all": false,
+      "context_update": {
+        "reset": false,
+        "remove_conditions": [],
+        "remove_filters": [],
+        "clear_sort": false,
+        "clear_limit": false,
+        "clear_topic": false,
+        "topic_action": "add",
+        "assignments": {},
+        "evidence": ""
+      },
+      "search": {
+        "predicates": [
+          {
+            "condition": "托卡马克领域人才",
+            "kind": "topic",
+            "fields": [
+              "领域",
+              "细分关键词"
+            ],
+            "op": "contains_any",
+            "values": [
+              "托卡马克"
+            ],
+            "related_values": []
+          }
+        ],
+        "topic_mode": "all"
+      }
+    },
+    "retrieval": {
+      "mode": "BM25",
+      "vector_status": "unavailable",
+      "dense_covered_people": 906,
+      "eligible_people": 906,
+      "lexical_candidates": 2,
+      "dense_candidates": 0,
+      "candidate_limit": 60,
+      "rerank": "not_configured",
+      "admission": "direct_topic_evidence",
+      "direct_candidates": 2,
+      "unsupported_candidates": 0
+    },
+    "unresolved": [],
+    "matched": 2
+  }
+]

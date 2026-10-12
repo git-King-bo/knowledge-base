@@ -1,0 +1,101 @@
+{
+  "question": "查找海外人才，蛋白质和托卡马克领域相关的",
+  "model": "qwen3.8-27b",
+  "elapsed_ms": 29600,
+  "plan": {
+    "intent": "filter",
+    "operation": null,
+    "field": null,
+    "message": "将海外作为地域事实条件，蛋白质和托卡马克按任一领域相关处理。",
+    "filters": [],
+    "concepts": [
+      {
+        "fields": [
+          "详细个人简介",
+          "代表成果",
+          "细分关键词",
+          "领域"
+        ],
+        "terms": [
+          "蛋白质",
+          "protein",
+          "蛋白质结构",
+          "protein structure",
+          "蛋白质设计",
+          "protein design",
+          "蛋白质工程",
+          "protein engineering",
+          "生物大分子",
+          "biomolecule"
+        ]
+      },
+      {
+        "fields": [
+          "详细个人简介",
+          "代表成果",
+          "细分关键词",
+          "领域"
+        ],
+        "terms": [
+          "托卡马克",
+          "tokamak",
+          "核聚变",
+          "fusion",
+          "磁约束",
+          "magnetic confinement",
+          "等离子体",
+          "plasma"
+        ]
+      }
+    ],
+    "evidence_conditions": [
+      "人才当前位于中国以外地区，或当前机构、当前职务、所在国家／城市明确显示其属于海外人才；仅历史海外经历不足以确认。",
+      "与蛋白质领域或托卡马克领域相关的人才；满足任一领域即可，不要求同时覆盖两个领域。"
+    ],
+    "topic_condition": "与蛋白质领域或托卡马克领域相关的人才；满足任一领域即可，不要求同时覆盖两个领域。",
+    "sort_by": null,
+    "descending": true,
+    "limit": 20,
+    "result_limit": null,
+    "match_all": false,
+    "context_update": {
+      "reset": false,
+      "remove_conditions": [],
+      "remove_filters": [],
+      "clear_sort": false,
+      "clear_limit": false,
+      "clear_topic": false,
+      "topic_action": "add",
+      "assignments": {},
+      "evidence": ""
+    }
+  },
+  "coverage": {
+    "eligible": 906,
+    "evaluated": 18,
+    "pending": 888,
+    "unknown": 0,
+    "adjacent": 0,
+    "complete": false,
+    "ranking_proven": false,
+    "result_limit_reached": false
+  },
+  "matched": 5,
+  "names": [
+    "林志宏",
+    "Jinwei Xu",
+    "柴菁菁",
+    "洪梅",
+    "周昕"
+  ],
+  "retrieval": {
+    "mode": "BM25（向量检索不可用，已降级）",
+    "lexical_candidates": 60,
+    "dense_candidates": 0,
+    "candidate_pool": 906,
+    "queued_pool": 906,
+    "limited": false,
+    "dense_covered_people": 0,
+    "query": "蛋白质 托卡马克"
+  }
+}

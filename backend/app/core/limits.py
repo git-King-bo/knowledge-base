@@ -98,7 +98,9 @@ def claim_model_input(messages):
 def embed_with_budget(db,job,client,texts):
     if not job.user_id:return client.embed_texts(texts)
     from app.core.security import usage_counter
-    day=now().date().isoformat();reserve=sum(len(text) for text in texts)*4
+    day=now().date().isoformat()
+    # Reserve all permitted attempts; timed-out upstream requests may still be billed.
+    reserve=sum(len(text.encode('utf-8'))+32 for text in texts)*(1+settings.embedding_max_retries)
     ensure_budget(db, job.user_id, day)
     result=db.execute(update(RequestBudgetModel).where(RequestBudgetModel.user_id==job.user_id,RequestBudgetModel.day==day,
         RequestBudgetModel.tokens+RequestBudgetModel.reserved+reserve<=settings.daily_token_budget).values(reserved=RequestBudgetModel.reserved+reserve))

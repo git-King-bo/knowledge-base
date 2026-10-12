@@ -30,6 +30,8 @@ def cell(value):
 
 
 def render_talent_answer(evidence, row_sources):
+    if evidence.get('search_mode') == 'hybrid':
+        return render_search_answer(evidence, row_sources)
     page = evidence['pagination']
     plan = evidence['plan']
     total = evidence['matched']
@@ -57,7 +59,9 @@ def render_talent_answer(evidence, row_sources):
     elif evidence['unranked']:
         parts.append(f"找到 {total} 条人才记录，均暂无 {cell(plan['sort_by'])}，以下展示基本信息，不做排名。")
     elif plan['sort_by']:
-        parts.append(f"找到 {total} 条人才记录，其中 {evidence['rankable']} 条有 {cell(plan['sort_by'])}，按{'从高到低' if plan['descending'] else '从低到高'}排列；另有 {evidence['missing']} 条缺少该指标，不参与排名。")
+        parts.append(f"找到 {total} 条人才记录，其中 {evidence['rankable']} 条有 {cell(plan['sort_by'])}，按{'从高到低' if plan['descending'] else '从低到高'}排列。")
+        if evidence['missing']:
+            parts.append(f"另有 {evidence['missing']} 条缺少该指标，仍保留展示，排在有指标的人才之后，并沿用原结果顺序。")
     else:
         parts.append(f'找到 {total} 条人才记录。')
     if page['returned']:
@@ -71,7 +75,10 @@ def render_talent_answer(evidence, row_sources):
         lines = ['| ' + ' | '.join(cell(column) for column in columns + ['来源']) + ' |', '| ' + ' | '.join(['---'] * (len(columns) + 1)) + ' |']
         rows = list(row_sources)
         if plan['sort_by'] and not evidence['unranked']:
-            rows.sort(key=lambda row: number_value(row.fields.get(plan['sort_by'], '')), reverse=plan['descending'])
+            def metric_key(row):
+                value=number_value(row.fields.get(plan['sort_by'], ''))
+                return (value is None, (-value if plan['descending'] else value) if value is not None else 0)
+            rows.sort(key=metric_key)
         for row in rows:
             fields = row.fields
             name = next((v for k, v in fields.items() if k.casefold() in {'姓名', '人员姓名', '员工姓名', 'name', 'full name'}), '')
@@ -101,6 +108,42 @@ def render_talent_answer(evidence, row_sources):
     retrieval = evidence.get('retrieval')
     if retrieval and '降级' in retrieval.get('mode', ''):
         parts.append('人才向量检索暂不可用，本次按文本相关性优先核验，仍保留其余候选。')
+    return '\n\n'.join(parts)
+
+
+def render_search_answer(evidence, rows):
+    """Do not present relevance ranking as an exhaustive or model-verified result."""
+    unresolved=evidence.get('unresolved_conditions',[])
+    total=evidence['matched']; page=evidence['pagination']; plan=evidence['plan']
+    parts=[f"本次检索返回 {total} 条{'待核验候选' if unresolved else '相关人才记录'}。" if total else
+           '本次未召回符合当前筛选范围的相关记录，不代表资料中不存在相关人才。']
+    if unresolved:
+        parts.append('以下条件尚无法可靠执行，结果不能视为已满足这些要求：'+'；'.join(cell(c) for c in unresolved))
+    if plan['sort_by'] and total:
+        parts.append(f"其中 {evidence['rankable']} 条有 {cell(plan['sort_by'])}，按{'从高到低' if plan['descending'] else '从低到高'}排列。")
+        if evidence['missing']:
+            parts.append(f"另有 {evidence['missing']} 条缺少该指标，仍保留在后，沿用相关性顺序。")
+        parts.append('排序仅覆盖当前召回结果，不代表全库精确排名。')
+    unknown=evidence.get('coverage',{}).get('unknown',0)
+    if unknown:
+        parts.append(f'{unknown} 条记录缺少必要的筛选字段，未计入当前结果。')
+    if page['returned']:
+        parts.append(f"本次展示第 {page['offset']+1}—{page['offset']+page['returned']} 条。")
+        columns=['姓名','当前机构','当前职务','领域','检索依据']
+        if plan['sort_by']:columns.append(plan['sort_by'])
+        lines=['| '+' | '.join(columns+['来源'])+' |','| '+' | '.join(['---']*(len(columns)+1))+' |']
+        for row in rows:
+            fields=row.fields
+            name=next((v for k,v in fields.items() if k.casefold() in {'姓名','name','人员姓名','员工姓名','full name'}),'')
+            lines.append('| '+' | '.join([cell(name if c=='姓名' else fields.get(c)) for c in columns]+[f'(Record {row.index})'])+' |')
+        parts.append('\n'.join(lines))
+    elif total:
+        parts.append('当前结果已展示完，没有下一页。')
+    retrieval=evidence.get('retrieval',{})
+    if retrieval.get('vector_status') in {'warming','busy','empty','unavailable','disabled'} and plan.get('topic_condition'):
+        parts.append('语义召回暂未就绪，本次使用文本相关性检索。')
+    if evidence.get('unreadable_files'):
+        parts.append('部分资料未能读取，本次结果未覆盖这些资料。')
     return '\n\n'.join(parts)
 
 

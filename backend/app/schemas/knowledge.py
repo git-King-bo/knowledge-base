@@ -103,6 +103,7 @@ class ConversationTurn(BaseModel):
 
 
 class AskRequest(BaseModel):
+    talent_search_mode: Literal['search','verify'] = Field(default='search', description='search混合检索；verify显式逐条严格核验')
     client_started_at: str | None = Field(default=None, max_length=40)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=80)
     turn_id: str | None = Field(default=None, min_length=1, max_length=80)

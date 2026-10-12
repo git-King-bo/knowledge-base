@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from time import perf_counter
+from time import perf_counter, sleep
 from sqlalchemy.orm import Session
 from app.repositories.sqlite import AIRepository
 from app.schemas.usage import TokenUsage
@@ -27,6 +27,7 @@ class EmbeddingConfig:
     api_url: str
     api_key: str | None
     model: str
+    query_timeout: float | None = None
 
 
 class EmbeddingClient:
@@ -45,7 +46,7 @@ class EmbeddingClient:
 
     def _client(self) -> httpx.Client:
         validate_provider_url(self.config.api_url, resolve=True)
-        timeout = settings.embedding_query_timeout if _query_mode.get() else 60.0
+        timeout = (self.config.query_timeout or settings.embedding_query_timeout) if _query_mode.get() else 60.0
         return httpx.Client(base_url=self.config.api_url.rstrip("/"), timeout=httpx.Timeout(timeout, connect=min(2.0, timeout)), trust_env=False)
 
     def _headers(self) -> dict[str, str]:
@@ -57,6 +58,21 @@ class EmbeddingClient:
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        retries = 0 if _query_mode.get() else settings.embedding_max_retries
+        for attempt in range(retries + 1):
+            try:
+                return self._embed_once(texts)
+            except Exception as exc:
+                cause = exc.__cause__ or exc
+                transient = isinstance(cause, (httpx.TimeoutException, httpx.NetworkError)) or (
+                    isinstance(cause, httpx.HTTPStatusError)
+                    and cause.response.status_code in {408, 429, 500, 502, 503, 504}
+                )
+                if not transient or attempt == retries:
+                    raise
+                sleep(settings.embedding_retry_backoff_seconds * (2 ** attempt))
+
+    def _embed_once(self, texts: list[str]) -> list[list[float]]:
         started = perf_counter()
         usage = TokenUsage()
         try:

@@ -101,6 +101,31 @@ class TalentExecutionTests(unittest.TestCase):
         result, _ = self.run_query(corpus(35), TalentPlan(sort_by='OpenAlex h-index'), size=100)
         self.assertEqual(result['pagination']['returned'], 35)
 
+    def test_missing_metrics_remain_visible_across_pages_in_both_directions(self):
+        for descending in (True, False):
+            data = corpus(5)
+            for index in (1, 3):
+                data.rows[index]['fields']['OpenAlex h-index'] = ''
+            plan = TalentPlan(sort_by='OpenAlex h-index', descending=descending)
+            result = None
+            seen = []
+            while True:
+                result, _ = self.run_query(data, plan, previous=result, size=2)
+                seen.extend(r['fields']['姓名'] for g in result['results'] for r in g['records'])
+                if not result['pagination']['has_more']:
+                    break
+            numeric = ['人员4', '人员2', '人员0'] if descending else ['人员0', '人员2', '人员4']
+            self.assertEqual(seen, numeric + ['人员1', '人员3'])
+            self.assertEqual(result['missing'], 2)
+
+    def test_resort_preserves_missing_records_and_their_previous_order(self):
+        from app.services.talent_results import sort_result
+        evidence = {'results': [{'source_id':'s','sheet':'t','records':[
+            {'excel_row':i,'fields':{'score':value}} for i,value in [(1,''),(2,'0'),(3,''),(4,'5')]]}],
+            'result_order':[['s','t',3],['s','t',4],['s','t',1],['s','t',2]], 'plan':{}}
+        result = json.loads(sort_result(evidence, 'score', True, None, 'sort', 10))
+        self.assertEqual([k[2] for k in result['result_order']], [4,2,3,1])
+
     def test_missing_evidence_cannot_certify_global_ranking(self):
         data = corpus(10)
         plan = TalentPlan(sort_by='OpenAlex h-index', evidence_conditions=['符合任职条件'])

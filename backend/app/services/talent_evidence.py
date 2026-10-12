@@ -167,7 +167,7 @@ def verify_candidates(question, plan, results, planner, *, max_calls=None):
     missing_batches=[[item for item in inputs if item['id'] not in cached_decisions] for inputs in input_batches]
     prefetched={}
     nonempty=[inputs for inputs in missing_batches if inputs]
-    if 1 < len(nonempty) <= 2 and callable(getattr(planner,'batch',None)):
+    if 1 < len(nonempty) <= MAX_MODEL_CALLS_PER_OPERATION and callable(getattr(planner,'batch',None)):
         responses=planner.batch([payload(inputs) for inputs in nonempty])
         prefetched={tuple(item['id'] for item in inputs):raw for inputs,raw in zip(nonempty,responses)}
 

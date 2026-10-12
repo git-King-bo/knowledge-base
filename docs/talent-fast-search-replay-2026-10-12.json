@@ -1,0 +1,104 @@
+{
+  "question": "查找海外人才，蛋白质和托卡马克领域相关的",
+  "model": "qwen3.8-27b",
+  "elapsed_ms": 5930,
+  "plan": {
+    "intent": "filter",
+    "operation": null,
+    "field": null,
+    "message": "",
+    "filters": [],
+    "concepts": [],
+    "evidence_conditions": [
+      "海外人才",
+      "蛋白质和托卡马克领域相关"
+    ],
+    "topic_condition": "蛋白质和托卡马克领域相关",
+    "sort_by": null,
+    "descending": true,
+    "limit": 20,
+    "result_limit": null,
+    "match_all": false,
+    "context_update": {
+      "reset": false,
+      "remove_conditions": [],
+      "remove_filters": [],
+      "clear_sort": false,
+      "clear_limit": false,
+      "clear_topic": false,
+      "topic_action": "add",
+      "assignments": {},
+      "evidence": ""
+    },
+    "search": {
+      "predicates": [
+        {
+          "condition": "海外人才",
+          "kind": "metadata",
+          "fields": [
+            "@current_region"
+          ],
+          "op": "equals_any",
+          "values": [
+            "加拿大",
+            "北美",
+            "德国",
+            "意大利",
+            "新加坡",
+            "新西兰",
+            "澳大利亚",
+            "瑞士",
+            "美国",
+            "英国"
+          ]
+        },
+        {
+          "condition": "蛋白质和托卡马克领域相关",
+          "kind": "topic",
+          "fields": [
+            "领域",
+            "细分关键词",
+            "技术角色定位",
+            "未来产业方向"
+          ],
+          "op": "contains_any",
+          "values": [
+            "蛋白质",
+            "Protein",
+            "托卡马克",
+            "Tokamak"
+          ]
+        }
+      ],
+      "topic_mode": "all"
+    }
+  },
+  "coverage": {
+    "eligible": 906,
+    "evaluated": 0,
+    "pending": 0,
+    "unknown": 14,
+    "adjacent": 0,
+    "complete": false,
+    "ranking_proven": false,
+    "result_limit_reached": false
+  },
+  "matched": 11,
+  "names": [
+    "Jinwei Xu",
+    "刘炳旭",
+    "周昕",
+    "慕宇光",
+    "柴菁菁"
+  ],
+  "retrieval": {
+    "mode": "BM25",
+    "vector_status": "warming",
+    "dense_covered_people": 0,
+    "eligible_people": 223,
+    "lexical_candidates": 11,
+    "dense_candidates": 0,
+    "candidate_limit": 60,
+    "rerank": "not_configured"
+  }
+}

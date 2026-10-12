@@ -78,7 +78,9 @@ def refresh_result(evidence):
     pending = state['total'] - state['cursor'] if state else 0
     total = len(entries)
     unranked = bool(plan.sort_by and total and not ranked)
-    ordered = entries if unranked else ranked
+    # Sorting is not a presence filter: keep matching records without a metric.
+    ordered = ranked + [(i, row) for i, row in entries
+                        if plan.sort_by and number_value(row['fields'].get(plan.sort_by, '')) is None]
     for group in evidence['results']:
         if 'error' in group:
             continue
@@ -124,7 +126,7 @@ def resume_search(evidence, question, planner, scope, offset, page_size):
         slots = min(initial_slots-calls, max(0, MAX_MODEL_CALLS_PER_OPERATION - (usage_counter.get() or {}).get('dispatched', 0)))
         if slots <= 0:
             break
-        width = 12 if (slots >= 2 and callable(getattr(planner, 'batch', None))
+        width = slots * 6 if (slots >= 2 and callable(getattr(planner, 'batch', None))
                        and (plan.result_limit is None or plan.result_limit > 6)) else 6
         window = state['queue'][state['cursor']:state['cursor'] + width]
         if window:

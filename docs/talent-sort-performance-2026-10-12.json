@@ -1,0 +1,20 @@
+{
+  "scope": "Replay the three recorded verification requests concurrently; excludes planning and database preparation",
+  "model": "qwen3.8-27b",
+  "elapsed_ms": 17270,
+  "calls": [
+    {
+      "ms": 13552,
+      "ok": true
+    },
+    {
+      "ms": 17268,
+      "ok": true
+    },
+    {
+      "ms": 15676,
+      "ok": true
+    }
+  ],
+  "previous_verification_ms": 39926
+}

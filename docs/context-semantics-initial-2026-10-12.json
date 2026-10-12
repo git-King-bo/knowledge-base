@@ -1,0 +1,721 @@
+{
+  "model": "qwen3.8-max",
+  "cases": 8,
+  "passed": 5,
+  "results": [
+    {
+      "id": "add_subject",
+      "question": "再加一项：关注可降解聚合物。",
+      "reviews": [],
+      "usage": [
+        {
+          "input_tokens": 2713,
+          "output_tokens": 133,
+          "total_tokens": 2846,
+          "cached_tokens": 0,
+          "source": "reported"
+        }
+      ],
+      "proposed": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [
+          {
+            "fields": [
+              "研究方向",
+              "详细个人简介"
+            ],
+            "terms": [
+              "可降解聚合物",
+              "biodegradable polymer",
+              "degradable polymer",
+              "生物可降解高分子"
+            ]
+          }
+        ],
+        "evidence_conditions": [],
+        "topic_condition": "可降解聚合物",
+        "sort_by": null,
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": "再加一项：关注可降解聚合物。"
+        }
+      },
+      "resolved": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [
+          {
+            "fields": [
+              "研究方向",
+              "详细个人简介"
+            ],
+            "terms": [
+              "可降解聚合物",
+              "biodegradable polymer",
+              "degradable polymer",
+              "生物可降解高分子"
+            ]
+          }
+        ],
+        "evidence_conditions": [
+          "当前在巴西工作"
+        ],
+        "topic_condition": "可降解聚合物",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": ""
+        }
+      },
+      "checks": {
+        "clarification": true,
+        "preserve_0": true,
+        "sort": true,
+        "contains_聚合物": true
+      },
+      "passed": true,
+      "model_calls": 1,
+      "duration_ms": 5258
+    },
+    {
+      "id": "remove_location",
+      "question": "人在哪里都行，研究方向照旧。",
+      "reviews": [
+        {
+          "verdict": "supported",
+          "message": ""
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 2720,
+          "output_tokens": 106,
+          "total_tokens": 2826,
+          "cached_tokens": 2048,
+          "source": "reported"
+        },
+        {
+          "input_tokens": 568,
+          "output_tokens": 9,
+          "total_tokens": 577,
+          "cached_tokens": 0,
+          "source": "reported"
+        }
+      ],
+      "proposed": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [],
+        "evidence_conditions": [],
+        "topic_condition": "量子传感",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [
+            0
+          ],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": "人在哪里都行，研究方向照旧。"
+        }
+      },
+      "resolved": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [],
+        "evidence_conditions": [
+          "量子传感"
+        ],
+        "topic_condition": "量子传感",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": ""
+        }
+      },
+      "checks": {
+        "clarification": true,
+        "remove_0": true,
+        "sort": true,
+        "topic": true
+      },
+      "passed": true,
+      "model_calls": 2,
+      "duration_ms": 3810
+    },
+    {
+      "id": "replace_location",
+      "question": "希望地点落在德国，其他要求照旧。",
+      "reviews": [
+        {
+          "verdict": "unsupported",
+          "message": "用户要求'其他要求照旧'，但proposed_plan移除了条件1'海洋观测'（evidence_conditions中缺失），与保留所有其他条件的意图不符。"
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 2724,
+          "output_tokens": 113,
+          "total_tokens": 2837,
+          "cached_tokens": 2176,
+          "source": "reported"
+        },
+        {
+          "input_tokens": 579,
+          "output_tokens": 45,
+          "total_tokens": 624,
+          "cached_tokens": 0,
+          "source": "reported"
+        }
+      ],
+      "proposed": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [],
+        "evidence_conditions": [
+          "当前在德国工作"
+        ],
+        "topic_condition": "海洋观测",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [
+            0,
+            1
+          ],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": "希望地点落在德国，其他要求照旧。"
+        }
+      },
+      "checks": {
+        "clarification": false
+      },
+      "passed": false,
+      "model_calls": 2,
+      "duration_ms": 4714
+    },
+    {
+      "id": "intersect_subject",
+      "question": "还得懂气候建模。",
+      "reviews": [],
+      "usage": [
+        {
+          "input_tokens": 2712,
+          "output_tokens": 145,
+          "total_tokens": 2857,
+          "cached_tokens": 2176,
+          "source": "reported"
+        }
+      ],
+      "proposed": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [
+          {
+            "fields": [
+              "研究方向",
+              "详细个人简介"
+            ],
+            "terms": [
+              "气候建模",
+              "climate modeling",
+              "气候模拟",
+              "地球系统模型",
+              "Earth system model",
+              "GCM",
+              "全球气候模型"
+            ]
+          }
+        ],
+        "evidence_conditions": [
+          "有企业研发经历",
+          "遥感",
+          "懂气候建模"
+        ],
+        "topic_condition": "遥感",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": "还得懂气候建模。"
+        }
+      },
+      "resolved": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [
+          {
+            "fields": [
+              "研究方向",
+              "详细个人简介"
+            ],
+            "terms": [
+              "气候建模",
+              "climate modeling",
+              "气候模拟",
+              "地球系统模型",
+              "Earth system model",
+              "GCM",
+              "全球气候模型"
+            ]
+          }
+        ],
+        "evidence_conditions": [
+          "有企业研发经历",
+          "遥感",
+          "懂气候建模"
+        ],
+        "topic_condition": "遥感",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": ""
+        }
+      },
+      "checks": {
+        "clarification": true,
+        "preserve_0": true,
+        "sort": true,
+        "contains_遥感": true,
+        "contains_气候": true
+      },
+      "passed": true,
+      "model_calls": 1,
+      "duration_ms": 3526
+    },
+    {
+      "id": "replace_subject",
+      "question": "研究方向以催化为准，地点和排序照旧。",
+      "reviews": [
+        {
+          "verdict": "unsupported",
+          "message": "用户要求'地点照旧'，但拟议计划清空了evidence_conditions中的'当前在巴西工作'（remove_conditions:[1]），与保留地点条件的意图不符。"
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 2724,
+          "output_tokens": 130,
+          "total_tokens": 2854,
+          "cached_tokens": 2176,
+          "source": "reported"
+        },
+        {
+          "input_tokens": 601,
+          "output_tokens": 47,
+          "total_tokens": 648,
+          "cached_tokens": 0,
+          "source": "reported"
+        }
+      ],
+      "proposed": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [
+          {
+            "fields": [
+              "研究方向",
+              "详细个人简介"
+            ],
+            "terms": [
+              "催化",
+              "catalysis",
+              "催化剂",
+              "catalyst"
+            ]
+          }
+        ],
+        "evidence_conditions": [],
+        "topic_condition": "催化",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [
+            1
+          ],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "replace",
+          "evidence": "研究方向以催化为准，地点和排序照旧。"
+        }
+      },
+      "checks": {
+        "clarification": false
+      },
+      "passed": false,
+      "model_calls": 2,
+      "duration_ms": 5036
+    },
+    {
+      "id": "negated_removal",
+      "question": "别理解成取消地点要求，只是在原范围里增加遥感方向。",
+      "reviews": [],
+      "usage": [
+        {
+          "input_tokens": 2727,
+          "output_tokens": 125,
+          "total_tokens": 2852,
+          "cached_tokens": 2176,
+          "source": "reported"
+        }
+      ],
+      "proposed": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [
+          {
+            "fields": [
+              "研究方向",
+              "详细个人简介"
+            ],
+            "terms": [
+              "遥感",
+              "remote sensing"
+            ]
+          }
+        ],
+        "evidence_conditions": [],
+        "topic_condition": "遥感",
+        "sort_by": null,
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": "别理解成取消地点要求，只是在原范围里增加遥感方向。"
+        }
+      },
+      "resolved": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [
+          {
+            "fields": [
+              "研究方向",
+              "详细个人简介"
+            ],
+            "terms": [
+              "遥感",
+              "remote sensing"
+            ]
+          }
+        ],
+        "evidence_conditions": [
+          "当前在巴西工作"
+        ],
+        "topic_condition": "遥感",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": ""
+        }
+      },
+      "checks": {
+        "clarification": true,
+        "preserve_0": true,
+        "sort": true,
+        "contains_遥感": true
+      },
+      "passed": true,
+      "model_calls": 1,
+      "duration_ms": 2818
+    },
+    {
+      "id": "ambiguous_reference",
+      "question": "这个不要了。",
+      "reviews": [
+        {
+          "verdict": "ambiguous",
+          "message": "「这个不要了」中的「这个」指代不明：是要移除某个具体条件（如「声学」「当前在巴西工作」或「有企业研发经历」），还是清空全部查询重新开始？请确认要删除的具体内容。"
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 2716,
+          "output_tokens": 102,
+          "total_tokens": 2818,
+          "cached_tokens": 2176,
+          "source": "reported"
+        },
+        {
+          "input_tokens": 565,
+          "output_tokens": 58,
+          "total_tokens": 623,
+          "cached_tokens": 0,
+          "source": "reported"
+        }
+      ],
+      "proposed": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [],
+        "evidence_conditions": [],
+        "topic_condition": "",
+        "sort_by": null,
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": true,
+          "remove_conditions": [
+            0,
+            1,
+            2
+          ],
+          "remove_filters": [],
+          "clear_sort": true,
+          "clear_limit": false,
+          "clear_topic": true,
+          "topic_action": "replace",
+          "evidence": "这个不要了。"
+        }
+      },
+      "checks": {
+        "clarification": true
+      },
+      "passed": true,
+      "model_calls": 2,
+      "duration_ms": 5077
+    },
+    {
+      "id": "english_reset",
+      "question": "Let's treat this as a separate search: coastal ecology, irrespective of all prior criteria.",
+      "reviews": [
+        {
+          "verdict": "supported",
+          "message": ""
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 2736,
+          "output_tokens": 154,
+          "total_tokens": 2890,
+          "cached_tokens": 2176,
+          "source": "reported"
+        },
+        {
+          "input_tokens": 633,
+          "output_tokens": 9,
+          "total_tokens": 642,
+          "cached_tokens": 0,
+          "source": "reported"
+        }
+      ],
+      "proposed": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [
+          {
+            "fields": [
+              "研究方向",
+              "详细个人简介"
+            ],
+            "terms": [
+              "coastal ecology",
+              "海岸生态学",
+              "滨海生态",
+              "近岸生态",
+              "coastal ecosystem",
+              "shoreline ecology"
+            ]
+          }
+        ],
+        "evidence_conditions": [],
+        "topic_condition": "coastal ecology",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": true,
+          "remove_conditions": [
+            0,
+            1
+          ],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": true,
+          "topic_action": "replace",
+          "evidence": "Let's treat this as a separate search: coastal ecology, irrespective of all prior criteria."
+        }
+      },
+      "resolved": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [
+          {
+            "fields": [
+              "研究方向",
+              "详细个人简介"
+            ],
+            "terms": [
+              "coastal ecology",
+              "海岸生态学",
+              "滨海生态",
+              "近岸生态",
+              "coastal ecosystem",
+              "shoreline ecology"
+            ]
+          }
+        ],
+        "evidence_conditions": [],
+        "topic_condition": "coastal ecology",
+        "sort_by": "影响力指标",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false,
+        "context_update": {
+          "reset": false,
+          "remove_conditions": [],
+          "remove_filters": [],
+          "clear_sort": false,
+          "clear_limit": false,
+          "clear_topic": false,
+          "topic_action": "add",
+          "evidence": ""
+        }
+      },
+      "checks": {
+        "clarification": true,
+        "remove_0": true,
+        "remove_1": true,
+        "sort": false
+      },
+      "passed": false,
+      "model_calls": 2,
+      "duration_ms": 4425
+    }
+  ]
+}

@@ -77,6 +77,21 @@ class QueryPerformanceTests(unittest.TestCase):
             self.assertEqual([c[0] for c in calls],['ok','fail'])
         finally:usage_counter.reset(token)
 
+    def test_four_reserved_calls_overlap_in_one_wave(self):
+        barrier = threading.Barrier(4, timeout=3)
+        token = usage_counter.set({'dispatched':0})
+        class Adapter:
+            def _chat_reserved(self, *args):
+                barrier.wait()
+                return SimpleNamespace(content='ok')
+        try:
+            results = run_model_batch(Adapter(), None,
+                [[ChatMessage(role='user', content=str(i))] for i in range(4)],
+                'm', None, lambda *args: None)
+            self.assertEqual(results, ['ok'] * 4)
+        finally:
+            usage_counter.reset(token)
+
     def test_budget_exhaustion_does_not_dispatch_or_log_unreserved_call(self):
         counter={'dispatched':4};token=usage_counter.set(counter)
         try:

@@ -94,7 +94,10 @@ def sort_result(evidence,field,descending,scope,question,limit):
     ranked.sort(key=lambda item:item[0],reverse=descending)
     evidence.update(matched=matched,rankable=len(ranked),missing=matched-len(ranked),
                     unranked=bool(matched and not ranked),ranking_scope='previous_results')
-    evidence['result_order']=[key for _,key in (ranked if ranked else candidates)]
+    previous_positions={tuple(key):i for i,key in enumerate(evidence.get('result_order',[]))}
+    missing=[item for item in candidates if item[0] is None]
+    missing.sort(key=lambda item:previous_positions.get(tuple(item[1]),len(previous_positions)))
+    evidence['result_order']=[key for _,key in ranked+missing]
     positions={tuple(key):i for i,key in enumerate(evidence['result_order'])}
     for group in evidence['results']:
         for row in group.get('records', []):

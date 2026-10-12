@@ -3,12 +3,12 @@ from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 
 from app.ai.base import json_output_requested
-from app.core.limits import claim_model_input
+from app.core.limits import claim_model_input, MAX_MODEL_CALLS_PER_OPERATION
 
 
 def run_model_batch(adapter, provider, messages_batch, model, api_key, record):
-    if len(messages_batch)>2:
-        raise ValueError('At most two verification calls per wave')
+    if len(messages_batch)>MAX_MODEL_CALLS_PER_OPERATION:
+        raise ValueError('Verification wave exceeds operation call budget')
     def send(messages):
         # Executor threads do not inherit request ContextVars or database sessions.
         started=perf_counter()
@@ -20,7 +20,7 @@ def run_model_batch(adapter, provider, messages_batch, model, api_key, record):
         finally:
             json_output_requested.reset(token)
     outputs=[]
-    with ThreadPoolExecutor(max_workers=2,thread_name_prefix='talent-verify') as pool:
+    with ThreadPoolExecutor(max_workers=MAX_MODEL_CALLS_PER_OPERATION,thread_name_prefix='talent-verify') as pool:
         work=[]
         for messages in messages_batch:
             try:
