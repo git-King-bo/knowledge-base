@@ -358,6 +358,36 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
                 knowledge_base_id=knowledge_base_id, success=result is not None,
                 latency_ms=int((perf_counter() - started) * 1000))
 
+    adapter = ai_provider_registry.resolve(provider.provider)
+    from app.core.security import actor
+    import hashlib
+    user=actor.get()
+    if user or not settings.auth_enabled:
+        identity=json.dumps([str(db.get_bind().url),user.id if user else 'local-no-auth',knowledge_base_id,
+                             provider.model_dump(),model,api_key],sort_keys=True,default=str)
+        plan_talent_query.cache_namespace=hashlib.sha256(identity.encode()).digest()
+        plan_talent_query.plan_context_key=hashlib.sha256(json.dumps(request_context,sort_keys=True,default=str).encode()).digest()
+    if settings.talent_parallel_verification and callable(getattr(adapter, '_chat_reserved', None)):
+        def batch(schemas):
+            from app.services.talent_evidence import verification_instructions
+            from app.services.model_batch import run_model_batch
+            messages_batch=[]
+            for schema in schemas:
+                if schema.get('phase')!='verify_candidates':
+                    raise ValueError('Only independent verification calls can run concurrently')
+                schema={**schema,'candidates':[{'id':item['id'],'passages':item['passages']} for item in schema['candidates']]}
+                messages_batch.append([
+                    ChatMessage(role='system',content=verification_instructions(len(schema['conditions']))),
+                    ChatMessage(role='user',content=json.dumps({'question':question,'schema':schema},ensure_ascii=False))])
+            def record(messages,result,error,latency):
+                ai_repo.create_activity_log(action='ask',provider_id=provider.id,model=model or provider.default_model,
+                    request_text=json.dumps([m.model_dump() for m in messages],ensure_ascii=False),
+                    response_text=result.content if result else model_error_message(error),
+                    usage=result.usage if result else None,knowledge_base_id=knowledge_base_id,
+                    success=result is not None,latency_ms=latency)
+            trace_note('并行核验调度', batches=len(messages_batch), concurrency=2, budget_reserved_before_dispatch=True)
+            return run_model_batch(adapter,provider,messages_batch,model or provider.default_model,api_key,record)
+        plan_talent_query.batch=batch
     return plan_talent_query
 
 
@@ -377,9 +407,15 @@ def search_knowledge(
         hybrid_search=lambda question,plan,sheets:hybrid_talents(db,knowledge_base_id,question,plan,sheets))
     evidence = json.loads(structured) if structured and structured.startswith('{') else {}
     if 'aggregate' in evidence:
-        return KnowledgeSearchResult(query=q, hits=[], talent_results=[], talent_notice=render_aggregate_answer(evidence))
+        return KnowledgeSearchResult(query=q, hits=[], talent_results=[], talent_notice=render_aggregate_answer(evidence),
+                                     talent_coverage=evidence.get('coverage', {}))
     if evidence.get('results'):
-        return KnowledgeSearchResult(query=q,hits=[],talent_results=evidence['results'])
+        from app.services.talent_answer import render_talent_answer
+        return KnowledgeSearchResult(query=q,hits=[],talent_results=evidence['results'],
+            talent_notice=render_talent_answer(evidence, []),
+            talent_coverage=evidence.get('coverage', {}))
+    if structured and not structured.startswith('{'):
+        return KnowledgeSearchResult(query=q,hits=[],talent_notice=structured)
     query_embedding = None
     embedding_client = EmbeddingClient(db=db, knowledge_base_id=knowledge_base_id)
     if embedding_client.enabled:
@@ -423,20 +459,33 @@ def _prepare_ask(payload: AskRequest, db: Session):
     talent_sources=ingestion_repo.list_active_spreadsheet_sources(payload.knowledge_base_id)
     snapshot_scope=result_scope(db,payload.knowledge_base_id,talent_sources)
     previous_state=history[-1].query_state if history else None
+    if previous_state and previous_state.knowledge_base_id != payload.knowledge_base_id:
+        history = []
+        previous_state = None
     previous_result=None
     if (not page_state and not payload.continuation and previous_state
             and previous_state.knowledge_base_id==payload.knowledge_base_id and previous_state.snapshot_id):
         previous_result=load_result(previous_state.snapshot_id,snapshot_scope,previous_state.query,previous_state.plan)
+    # Re-sorting an unfinished candidate prefix is not a new full-scope ranking.
+    if previous_result and not previous_result.get('coverage', {}).get('complete', True):
+        previous_result = None
     sort_fields=sorted({field for group in previous_result['results'] for row in group.get('records',[])
                         for field in row['fields']}) if previous_result else None
     result_action={}
-    retrieval_query = page_state.query if page_state else resolve_retrieval_query(payload, history, provider, api_key, db,
-        sort_fields=sort_fields,result_action=result_action)
+    combined_planning = bool(settings.talent_combined_planning and talent_sources and previous_state
+                             and not page_state and not payload.continuation and not sort_fields)
+    if combined_planning:
+        retrieval_query = payload.question
+        trace_note('理解追问与查询改写', status='skipped', reason='与人才查询规划合并；保留上一轮完整条件计划')
+    else:
+        retrieval_query = page_state.query if page_state else resolve_retrieval_query(payload, history, provider, api_key, db,
+            sort_fields=sort_fields,result_action=result_action)
     trace_note('确定检索问题', original=payload.question, query=retrieval_query, reused_page_plan=bool(page_state))
     plan_talent_query = _talent_query_planner(db, retrieval_query, provider, api_key, payload.model, payload.knowledge_base_id,
         request_context={'original_question':payload.question,
                          'previous_question':history[-1].question if history else None,
                          'previous_plan':history[-1].query_state.plan if history and history[-1].query_state else None})
+    plan_talent_query.requires_context = combined_planning
     from app.services.talent_hybrid import hybrid_talents
     try:
         with trace_stage('人才结构化检索'):
@@ -474,6 +523,9 @@ def _prepare_ask(payload: AskRequest, db: Session):
             trace_note(step, status='skipped', reason='人才结构化路径直接基于全表筛选和分页结果输出，不执行此环节')
         trace_note('结构化结果生成', records=len(row_sources), model_call=False, query_state=response.query_state.model_dump() if response.query_state else None)
         raise PreparedTalentAnswer(response)
+    if combined_planning:
+        # Document questions still need a standalone query for chunk retrieval.
+        retrieval_query = resolve_retrieval_query(payload, history, provider, api_key, db)
     table_context_lines = []
     if payload.web_search_mode != "web" and needs_spreadsheet_stats(retrieval_query):
         for source in ingestion_repo.list_active_spreadsheet_sources(payload.knowledge_base_id):

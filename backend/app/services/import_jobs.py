@@ -27,7 +27,7 @@ class StaleRevision(RuntimeError):
     pass
 
 def fingerprint():
-    return hashlib.sha256(json.dumps({'parser':'v2','chunk':settings.knowledge_chunk_max_chars,
+    return hashlib.sha256(json.dumps({'parser':'v3-record-ownership','chunk':settings.knowledge_chunk_max_chars,
         'overlap':settings.knowledge_chunk_overlap_chars,'embedding_url':settings.embedding_api_url,
         'embedding_model':settings.embedding_model},sort_keys=True).encode()).hexdigest()
 
@@ -57,6 +57,38 @@ def enqueue(db, source_id, base_id, *, stage='queued'):
         status='queued',stage=stage,completed=0,total=0,attempts=0,cancel_requested=False,created_at=now(),updated_at=now())
     db.add(job);db.commit();db.refresh(job)
     return job
+
+
+def talent_index_incomplete(db, source_id):
+    """A vector count alone cannot establish usable record-level coverage."""
+    talents = db.scalar(select(func.count()).select_from(TalentModel).where(TalentModel.source_id == source_id))
+    if not talents:
+        return False
+    chunks = db.scalar(select(func.count()).select_from(KnowledgeChunkModel).where(KnowledgeChunkModel.source_id == source_id))
+    owned, people = db.execute(select(func.count(ChunkTalentModel.chunk_id), func.count(func.distinct(ChunkTalentModel.talent_id)))
+        .join(KnowledgeChunkModel, KnowledgeChunkModel.id == ChunkTalentModel.chunk_id)
+        .join(TalentModel, TalentModel.id == ChunkTalentModel.talent_id)
+        .where(KnowledgeChunkModel.source_id == source_id, TalentModel.source_id == source_id)).one()
+    return chunks == 0 or owned != chunks or people != talents
+
+
+def queue_index_repairs(db):
+    """Idempotently schedule legacy ownership repairs; failed jobs need explicit retry."""
+    pending = db.scalar(select(func.count()).select_from(ImportJobModel).where(ImportJobModel.status.in_(['queued','running'])))
+    sources = db.scalars(select(KnowledgeSourceModel).where(KnowledgeSourceModel.status == 'parsed'))
+    for source in list(sources):
+        if pending >= settings.max_pending_jobs:
+            break
+        if not talent_index_incomplete(db, source.id):
+            continue
+        existing = db.scalar(select(ImportJobModel.id).where(ImportJobModel.source_id == source.id,
+            ImportJobModel.status.in_(['queued','running','failed','cancelled'])))
+        if existing:
+            continue
+        base_id = db.scalar(select(KnowledgeBaseSourceModel.knowledge_base_id).where(KnowledgeBaseSourceModel.source_id == source.id))
+        if base_id:
+            enqueue(db, source.id, base_id, stage='repair_record_index')
+            pending += 1
 
 
 def submit(db, base_id, filename, raw):
@@ -105,7 +137,7 @@ def process_job(db,job):
     talents=list(db.scalars(select(TalentModel).where(TalentModel.source_id==source.id).order_by(TalentModel.sheet_name,TalentModel.source_row)))
     stale=bool(index and index.indexed_revision!=index.revision and index.edited)
     existing_chunks=repo.list_chunks(source_id=source.id)
-    if not existing_chunks or stale:
+    if not existing_chunks or stale or talent_index_incomplete(db, source.id):
         if not talents:
             result=subprocess.run([sys.executable,'-m','app.services.parse_worker',str(Path(source.storage_path).resolve()),source.filename,source.id],
                 capture_output=True,text=True,timeout=240 if settings.ocr_enabled else 60)
@@ -166,6 +198,7 @@ class Worker:
             for job in db.scalars(select(ImportJobModel).where(ImportJobModel.status=='running')):
                 job.status='queued';job.updated_at=now()
             db.commit()
+            queue_index_repairs(db)
         self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
     def run(self):
         while not self.stop.is_set():

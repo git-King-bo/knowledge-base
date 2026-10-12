@@ -7,8 +7,6 @@ from collections import Counter
 from sqlalchemy import select
 from sqlalchemy.orm import load_only
 from app.core.config import settings
-from app.core.security import usage_counter
-from app.core.limits import MAX_MODEL_CALLS_PER_OPERATION
 from app.db.models import ChunkTalentModel, KnowledgeChunkModel, KnowledgeChunkEmbeddingModel, SourceIndexModel
 from app.services.embeddings import EmbeddingClient
 from app.services.agent_trace import trace_note, trace_stage
@@ -16,7 +14,7 @@ from app.services.retrieval_cache import dense_scores
 from app.services.talent_search import execute_plan, normalized
 
 RESEARCH_FIELDS = {'姓名','英文名','当前机构','当前职务','详细个人简介','代表成果','研究方向',
-                   '细分关键词','领域','未来产业方向','工作经历','创业／项目经历','技术角色定位'}
+                   '细分关键词','领域','未来产业方向','教育经历','工作经历','创业／项目经历','技术角色定位'}
 
 
 def tokens(text):
@@ -27,8 +25,17 @@ def tokens(text):
 
 
 def bm25(query, documents):
-    vectors = [Counter(tokens(text)) for text in documents]
-    lengths = [sum(v.values()) for v in vectors]
+    import hashlib
+    from app.services.query_cache import lexical_cache
+    key = hashlib.sha256(json.dumps(documents,ensure_ascii=False).encode()).digest()
+    cached = lexical_cache.get(key)
+    if cached is None:
+        vectors = [Counter(tokens(text)) for text in documents]
+        lengths = [sum(v.values()) for v in vectors]
+        lexical_cache.put(key, (vectors, lengths))
+    else:
+        vectors, lengths = cached
+    trace_note('人才词项索引缓存', hit=cached is not None)
     average = sum(lengths) / max(len(lengths), 1) or 1
     terms = set(tokens(query))
     df = {term: sum(term in vector for vector in vectors) for term in terms}
@@ -121,10 +128,10 @@ def hybrid_talents(db, knowledge_base_id, question, plan, sheets):
     for order in (lexical_order,dense_order):
         for rank,i in enumerate(order,1):
             fused[i] = fused.get(i,0) + 1/(60+rank)
-    ordered = sorted(fused,key=lambda i:(fused[i],exact[i]),reverse=True)
-    # Stay inside the existing per-request model budget. Report candidate truncation explicitly.
-    slots = max(0,MAX_MODEL_CALLS_PER_OPERATION-(usage_counter.get() or {}).get('dispatched',0))
-    selected = ordered[:slots*6]
+    # Recall is a priority signal, never a membership/call-budget gate. Keeping
+    # the tail makes missing aliases/index coverage recoverable by continuation.
+    ordered = sorted(range(len(entries)),key=lambda i:(fused.get(i,0),exact[i]),reverse=True)
+    selected = ordered
     selected_rank = {i:rank for rank,i in enumerate(selected)}
     for group in all_results:
         group['records'] = []
@@ -135,7 +142,8 @@ def hybrid_talents(db, knowledge_base_id, question, plan, sheets):
         group['records'].append(record)
         group['matched_records'] += 1
     metadata = {'mode':mode,'lexical_candidates':len(lexical_order),'dense_candidates':dense_count,
-        'candidate_pool':len(ordered),'verified_pool':len(selected),'limited':len(ordered)>len(selected),
+        'candidate_pool':len(ordered),'queued_pool':len(selected),'limited':False,
+        'dense_covered_people':dense_count,
         'query':query}
     trace_note('人才混合召回',**metadata)
     return all_results,metadata

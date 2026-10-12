@@ -24,7 +24,9 @@ class OpenAICompatibleProvider(AIProvider):
 
     def _client(self, config: ProviderConfig) -> httpx.Client:
         validate_provider_url(config.base_url, resolve=True)
-        return httpx.Client(base_url=config.base_url.rstrip("/"), timeout=60.0, trust_env=False)
+        from app.ai.base import json_output_requested
+        timeout = settings.structured_model_timeout if json_output_requested.get() else 60.0
+        return httpx.Client(base_url=config.base_url.rstrip("/"), timeout=httpx.Timeout(timeout, connect=min(5.0,timeout)), trust_env=False)
 
     def test(self, config: ProviderConfig, api_key: str | None = None) -> ProviderTestResult:
         try:
@@ -72,6 +74,10 @@ class OpenAICompatibleProvider(AIProvider):
     ) -> ChatResult:
         from app.core.limits import claim_model_input
         claim_model_input(messages)
+        return self._chat_reserved(config, messages, model, api_key)
+
+    def _chat_reserved(self, config, messages, model=None, api_key=None):
+        """Network only. Caller must reserve budget before scheduling this method."""
         selected_model = model or config.default_model
         payload = {
             "model": selected_model,

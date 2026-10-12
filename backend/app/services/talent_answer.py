@@ -36,12 +36,21 @@ def render_talent_answer(evidence, row_sources):
     labels = [f"{cell(item['field'])}：{cell(item['value'])}" for item in plan['filters']]
     # Expanded terms and verification instructions belong in traces, not the answer.
     parts = ['；'.join(labels)] if labels else []
+    coverage = evidence.get('coverage', {})
+    if coverage and not coverage.get('complete'):
+        parts.append(f"已核验 {coverage['evaluated']} / {coverage['eligible']} 条候选，以下为目前确认的结果。")
+    if coverage.get('unknown'):
+        parts.append(f"有 {coverage['unknown']} 条记录资料不足或未能完成核验，不能将其视为不匹配。")
     if evidence.get('ranking_scope')=='previous_results':
         parts.append('以下按上一轮已匹配的人才排序。')
     elif evidence.get('ranking_scope')=='matched_results':
         parts.append('以下对本次已匹配的人才排序，不代表全库排名。')
+    elif evidence.get('ranking_scope')=='verified_prefix':
+        parts.append('按完整候选范围的指标顺序核验后排列；尚未处理的有指标记录不会排在当前结果之前。')
     verification = evidence.get('verification')
-    if not total and verification:
+    if not total and coverage.get('pending'):
+        parts.append('目前已核验的记录中尚未确认匹配，仍有候选待处理。')
+    elif not total and verification:
         parts.append(f"跨字段召回 {verification['candidates']} 条候选，但现有原文尚不能确认有人同时满足全部条件。这不等于没有相关人才，也不代表已穷尽全库。")
     elif not total:
         parts.append('当前知识库中没有符合这些条件的人才记录。可以放宽机构或领域条件后再查询。')
@@ -71,9 +80,9 @@ def render_talent_answer(evidence, row_sources):
         parts.append('\n'.join(lines))
     elif total:
         parts.append('当前查询结果已展示完，没有下一页。')
-    if page['has_more']:
-        parts.append('回复“继续”查看下一页。')
-    elif page['returned']:
+    if not page['has_more'] and coverage.get('pending') and not coverage.get('result_limit_reached'):
+        parts.append('本次仍有候选未处理，查询进度未能保存，请重新执行查询。')
+    elif not page['has_more'] and page['returned']:
         parts.append('以上已展示完本次可列出的结果。')
     failed = evidence.get('unreadable_files', []) + [r['file'] for r in evidence['results'] if 'error' in r]
     if failed:
@@ -89,6 +98,9 @@ def render_talent_answer(evidence, row_sources):
                     '尚未确认满足全部筛选条件。来源：'+cell(item['file'])+' / '+
                     cell(item['sheet'])+' 第 '+str(item['row'])+' 行。')
             parts.append('\n'.join(lines))
+    retrieval = evidence.get('retrieval')
+    if retrieval and '降级' in retrieval.get('mode', ''):
+        parts.append('人才向量检索暂不可用，本次按文本相关性优先核验，仍保留其余候选。')
     return '\n\n'.join(parts)
 
 
@@ -101,6 +113,12 @@ def render_aggregate_answer(evidence):
         answer += '\n\n| 字段值 | 记录数 |\n| --- | --- |\n'
         answer += '\n'.join(f"| {cell(value)} | {count} |" for value, count in stats['groups'].items())
         answer += f"\n\n另有 {stats['empty']} 条记录的该字段为空。"
+    coverage=evidence.get('coverage', {})
+    if coverage and (not coverage['complete'] or coverage['unknown'] or coverage.get('adjacent')):
+        answer='以下为目前已确认的统计，不能视为全库精确总数。\n\n'+answer
+        answer+=f"\n\n已核验 {coverage['evaluated']} / {coverage['eligible']} 条，待处理 {coverage['pending']} 条，资料不足或核验失败 {coverage['unknown']} 条。"
+        if coverage.get('adjacent'):
+            answer+=f"其中 {coverage['adjacent']} 条只有相近主题依据，具体主题关联仍待确认。"
     answer += '\n\n统计口径：' + stats['basis']
     answer += '\n\n统计来源：' + '；'.join(f"{cell(item['file'])} / {cell(item['sheet'])}（扫描 {item['scanned_records']} 条）" for item in stats['sources'])
     return answer
@@ -113,11 +131,17 @@ def prepare_response(payload, provider, query, evidence, rows):
         rows=[row.model_copy(update={'index':i}) for i,row in enumerate(rows,1)]
     if 'aggregate' in evidence:
         answer = render_aggregate_answer(evidence)
+        page=evidence.get('pagination')
+        state=TalentQueryState(knowledge_base_id=payload.knowledge_base_id,query=query,
+            snapshot_id=evidence.get('snapshot_id'),plan=evidence['plan'],offset=0,
+            page_size=payload.talent_page_size,returned=0,has_more=page['has_more']) if page else None
         return AskResponse(answer=answer, provider_id=provider.id, model=payload.model or provider.default_model,
-                           sources=[], row_sources=[], retrieval_query=query)
+                           sources=[], row_sources=[], retrieval_query=query,query_state=state,
+                           talent_coverage=evidence.get('coverage', {}))
     page = evidence['pagination']
     return AskResponse(answer=render_talent_answer(evidence, rows), provider_id=provider.id,
         model=payload.model or provider.default_model, sources=[], row_sources=rows, retrieval_query=query,
+        talent_coverage=evidence.get('coverage', {}),
         query_state=TalentQueryState(knowledge_base_id=payload.knowledge_base_id, query=query,
             snapshot_id=evidence.get('snapshot_id'),
             plan=evidence['plan'], offset=page['offset'], page_size=page['page_size'],

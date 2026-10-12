@@ -32,7 +32,7 @@ class TalentConversationTests(unittest.TestCase):
         prompt = messages[0].content
         if prompt.startswith('你只负责'):
             current = messages[-1].content
-            query = '清华大学人才'
+            query = '当前机构列包含清华大学的人才'
             if '具身智能' in current:
                 self.assertIn('上一次查询状态', prompt)
                 query += '，具身智能领域'
@@ -41,9 +41,9 @@ class TalentConversationTests(unittest.TestCase):
             result = {'query': query}
         elif prompt.startswith('先识别用户任务'):
             query = json.loads(messages[-1].content)['question']
-            filters = [{'field': '当前机构', 'op': 'contains', 'value': '清华大学'}]
+            filters = [{'field': '当前机构', 'op': 'contains', 'value': '清华大学', 'literal': True}]
             if '具身智能' in query:
-                filters.append({'field': '领域', 'op': 'contains', 'value': '具身智能'})
+                filters.append({'field': '领域', 'op': 'contains', 'value': '具身智能', 'literal': True})
             result = {'filters': filters, 'sort_by': 'OpenAlex h-index' if 'OpenAlex' in query else None,
                       'descending': True, 'limit': 20}
         else:
@@ -62,7 +62,7 @@ class TalentConversationTests(unittest.TestCase):
                 result = response.json()
                 history.append({'question': question, 'answer': result['answer'], 'query_state': result['query_state']})
                 return result
-            first = ask('提取清华大学相关人才')
+            first = ask('当前机构列包含清华大学的人才')
             self.assertEqual(len(first['row_sources']), 5)
             self.assertNotIn('可排序', first['answer'])
             self.assertNotIn('无缺失', first['answer'])
@@ -100,12 +100,12 @@ class TalentConversationTests(unittest.TestCase):
         base = self.roster()
         with patch.object(OpenAICompatibleProvider, 'chat', side_effect=self.chat):
             first = self.client.post('/api/knowledge/ask', json={
-                'question': '清华大学人才，按OpenAlex h-index降序', 'knowledge_base_id': base}).json()
+                'question': '当前机构列包含清华大学的人才，按OpenAlex h-index降序', 'knowledge_base_id': base}).json()
         with patch.object(OpenAICompatibleProvider, 'chat') as model, \
              patch.object(OpenAICompatibleProvider, 'stream_chat') as stream:
             response = self.client.post('/api/knowledge/ask/stream', json={
                 'question': '下一页', 'knowledge_base_id': base,
-                'history': [{'question': '清华大学人才，按OpenAlex h-index降序',
+                'history': [{'question': '当前机构列包含清华大学的人才，按OpenAlex h-index降序',
                              'answer': first['answer'], 'query_state': first['query_state']}]})
         self.assertEqual(response.status_code, 200, response.text)
         events = {block.splitlines()[0][7:]: json.loads(block.splitlines()[1][6:])
@@ -122,18 +122,55 @@ class TalentConversationTests(unittest.TestCase):
         with patch.object(OpenAICompatibleProvider, 'chat') as model:
             response = self.client.post('/api/knowledge/ask', json={
                 'question': '继续', 'knowledge_base_id': base,
-                'history': [{'question': '清华大学人才', 'answer': '前5人'}]})
+                'history': [{'question': '当前机构列包含清华大学的人才', 'answer': '前5人'}]})
         self.assertEqual(response.status_code, 200)
         self.assertIn('旧会话没有分页记录', response.json()['answer'])
         model.assert_not_called()
+
+    def test_semantic_empty_page_resumes_through_streaming_api(self):
+        base=self.roster()
+        def chat(config,messages,model,key):
+            data=json.loads(messages[-1].content)
+            schema=data['schema']
+            if schema.get('phase')=='verify_candidates':
+                decisions=[]
+                for item in schema['candidates']:
+                    proof=[p['id'] for p in item['passages'] if p['field']=='姓名' and p['quote']=='人才35']
+                    decisions.append({'id':item['id'],'checks':[{'status':'supported' if proof else 'contradicted','refs':proof}]})
+                content={'decisions':decisions}
+            else:
+                content={'intent':'filter','evidence_conditions':['姓名是人才35']}
+            return ChatResult(content=json.dumps(content),usage=TokenUsage())
+        def unranked_recall(db,base,question,plan,sheets):
+            # Exercise the tail when the prioritizer has no useful signal.
+            return ([{'source_id':s.source_id,'file':s.filename,'sheet':s.sheet,
+                      'records':[{'excel_row':r['row'],'fields':r['fields'],'_hybrid_rank':i}
+                                 for i,r in enumerate(s.rows)]} for s in sheets],{'mode':'fixture'})
+        with patch.object(OpenAICompatibleProvider,'chat',side_effect=chat), \
+             patch.object(OpenAICompatibleProvider,'_chat_reserved',side_effect=chat), \
+             patch('app.services.talent_hybrid.hybrid_talents',side_effect=unranked_recall):
+            first=self.client.post('/api/knowledge/ask',json={'question':'查找姓名是人才35的人才','knowledge_base_id':base})
+            self.assertEqual(first.status_code,200,first.text)
+            data=first.json()
+            self.assertEqual(data['row_sources'],[])
+            self.assertTrue(data['query_state']['has_more'])
+            self.assertEqual(data['query_state']['returned'],0)
+            resumed=self.client.post('/api/knowledge/ask/stream',json={'question':'继续','knowledge_base_id':base,
+                'history':[{'question':'查找姓名是人才35的人才','answer':data['answer'],'query_state':data['query_state']}]})
+            self.assertEqual(resumed.status_code,200,resumed.text)
+            events={block.splitlines()[0][7:]:json.loads(block.splitlines()[1][6:])
+                    for block in resumed.text.strip().split('\n\n')}
+            self.assertEqual([r['fields']['姓名'] for r in events['meta']['row_sources']],['人才35'])
+            self.assertTrue(events['meta']['talent_coverage']['complete'])
+            self.assertFalse(events['meta']['query_state']['has_more'])
 
     def test_sort_followup_reuses_all_verified_results_and_pages_without_retrieval(self):
         base=self.roster()
         with patch('app.services.talent_results.result_scope',return_value=('user',base,'revision')):
             with patch.object(OpenAICompatibleProvider,'chat',side_effect=self.chat):
                 first=self.client.post('/api/knowledge/ask',json={
-                    'question':'清华大学人才','knowledge_base_id':base}).json()
-            history=[{'question':'清华大学人才','answer':first['answer'],'query_state':first['query_state']}]
+                    'question':'当前机构列包含清华大学的人才','knowledge_base_id':base}).json()
+            history=[{'question':'当前机构列包含清华大学的人才','answer':first['answer'],'query_state':first['query_state']}]
             def classify(config,messages,model,key):
                 self.assertIn('result_sort',messages[0].content)
                 return ChatResult(content=json.dumps({'result_sort':{'field':'OpenAlex h-index','descending':False}}),usage=TokenUsage())
@@ -150,3 +187,37 @@ class TalentConversationTests(unittest.TestCase):
                 page=self.client.post('/api/knowledge/ask',json={'question':'继续','knowledge_base_id':base,'history':history}).json()
                 self.assertEqual(model.call_count,1)
                 self.assertEqual([r['fields']['姓名'] for r in page['row_sources']],['人才3','人才2','人才1'])
+
+    def test_combined_planning_reuses_versioned_rows_and_keeps_previous_constraints(self):
+        from app.core.config import settings
+        from app.services.talent_search import read_talent_sheets
+        base=self.roster()
+        planned=[]
+        def respond(config,messages,model,key):
+            request=json.loads(messages[-1].content)
+            schema=request['schema']
+            if schema.get('phase')=='verify_candidates':
+                content={'decisions':[{'id':r['id'],'checks':[{'status':'supported','refs':[0]}]} for r in schema['candidates']]}
+            else:
+                planned.append(request)
+                if len(planned)==2:
+                    self.assertEqual(request['request_context']['previous_plan']['evidence_conditions'],['当前任职清华大学'])
+                    self.assertEqual(request['request_context']['original_question'],'按OpenAlex h-index降序')
+                content={'intent':'filter','evidence_conditions':['当前任职清华大学'],
+                         'sort_by':'OpenAlex h-index' if len(planned)==2 else None}
+            return ChatResult(content=json.dumps(content),usage=TokenUsage())
+        with patch.object(settings,'talent_combined_planning',True), \
+             patch.object(settings,'talent_parallel_verification',True), \
+             patch.object(OpenAICompatibleProvider,'chat',side_effect=respond), \
+             patch.object(OpenAICompatibleProvider,'_chat_reserved',side_effect=respond), \
+             patch('app.services.talent_search.read_talent_sheets',wraps=read_talent_sheets) as read:
+            first=self.client.post('/api/knowledge/ask',json={'question':'当前任职清华大学的人才','knowledge_base_id':base}).json()
+            self.assertTrue(first['query_state']['has_more'])
+            second=self.client.post('/api/knowledge/ask',json={
+                'question':'按OpenAlex h-index降序','knowledge_base_id':base,
+                'history':[{'question':'当前任职清华大学的人才','answer':first['answer'],'query_state':first['query_state']}]})
+            self.assertEqual(second.status_code,200,second.text)
+            self.assertEqual(read.call_count,1)
+            self.assertEqual(len(planned),2)
+            self.assertEqual(second.json()['query_state']['plan']['evidence_conditions'],['当前任职清华大学'])
+            self.assertEqual([r['fields']['OpenAlex h-index'] for r in second.json()['row_sources']],['80','79','78','77','76'])

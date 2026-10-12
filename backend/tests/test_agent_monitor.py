@@ -180,13 +180,13 @@ class AgentTalentTraceTests(unittest.TestCase):
         from app.ai.providers.openai_compatible import OpenAICompatibleProvider
         base = TalentConversationTests.roster(self)
         with patch.object(OpenAICompatibleProvider, 'chat', side_effect=lambda *args: TalentConversationTests.chat(self, *args)):
-            first = self.client.post('/api/knowledge/ask', json={'question': '提取清华大学相关人才',
+            first = self.client.post('/api/knowledge/ask', json={'question': '当前机构列包含清华大学的人才',
                 'knowledge_base_id': base, 'conversation_id': 'talents', 'turn_id': '1'})
             self.assertEqual(first.status_code, 200, first.text)
             response = first.json()
             second = self.client.post('/api/knowledge/ask', json={'question': '继续',
                 'knowledge_base_id': base, 'conversation_id': 'talents', 'turn_id': '2',
-                'history': [{'question': '提取清华大学相关人才', 'answer': response['answer'], 'query_state': response['query_state']}]})
+                'history': [{'question': '当前机构列包含清华大学的人才', 'answer': response['answer'], 'query_state': response['query_state']}]})
             self.assertEqual(second.status_code, 200, second.text)
         monitor = self.client.get('/api/agent-monitor', params={'conversation_id': 'talents', 'page_size': 1}).json()
         self.assertEqual(monitor['total'], 2)

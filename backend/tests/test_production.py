@@ -82,6 +82,30 @@ class ProductionTests(unittest.TestCase):
         result=self.client.post('/api/imports/'+self.other+'/reuse',json={'sha256':hashlib.sha256(raw).hexdigest()})
         self.assertEqual(result.json(),{'reused':False})
         self.assertEqual(self.client.get('/api/talents').json()['total'],0)
+
+    def test_legacy_record_index_is_repaired_idempotently_without_losing_people(self):
+        from sqlalchemy import delete
+        from app.db.models import ChunkTalentModel, KnowledgeChunkModel
+        from app.services.import_jobs import queue_index_repairs, talent_index_incomplete
+        self.login()
+        imported=self.submit()
+        process_job(self.db,self.db.get(ImportJobModel,imported['job']['id']))
+        source_id=imported['source_id']
+        before=[(t.id,t.raw_data_json) for t in self.db.scalars(select(TalentModel).where(TalentModel.source_id==source_id))]
+        self.db.execute(delete(ChunkTalentModel))
+        self.db.commit()
+        self.assertTrue(talent_index_incomplete(self.db,source_id))
+        queue_index_repairs(self.db)
+        queue_index_repairs(self.db)
+        pending=list(self.db.scalars(select(ImportJobModel).where(ImportJobModel.status=='queued')))
+        self.assertEqual(len(pending),1)
+        process_job(self.db,pending[0])
+        self.assertFalse(talent_index_incomplete(self.db,source_id))
+        after=[(t.id,t.raw_data_json) for t in self.db.scalars(select(TalentModel).where(TalentModel.source_id==source_id))]
+        self.assertEqual(before,after)
+        self.assertGreater(self.db.scalar(select(func.count()).select_from(ChunkTalentModel)),0)
+        queue_index_repairs(self.db)
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(ImportJobModel).where(ImportJobModel.status=='queued')),0)
     def test_conversation_ownership(self):
         self.login('editor')
         data={'title':'test','messages':[],'favorite':True}

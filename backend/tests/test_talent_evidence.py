@@ -48,8 +48,10 @@ class TalentEvidenceTests(unittest.TestCase):
                 return json.dumps(response)
             with self.subTest(kind=kind):
                 if kind=='id':
-                    with self.assertRaises(ValueError):
-                        verify_candidates('test',self.plan,execute_plan(self.plan,[self.sheet]),bad)
+                    results=execute_plan(self.plan,[self.sheet])
+                    stats=verify_candidates('test',self.plan,results,bad)
+                    self.assertEqual(stats['supported'],0)
+                    self.assertEqual(stats['unverified'],2)
                 else:
                     results=execute_plan(self.plan,[self.sheet])
                     stats=verify_candidates('test',self.plan,results,bad)
@@ -72,8 +74,9 @@ class TalentEvidenceTests(unittest.TestCase):
 
     def test_over_budget_candidates_do_not_silently_return_partial_matches(self):
         self.sheet.rows=self.rows[:1]*61
-        with self.assertRaises(ValueError):
-            verify_candidates('test',self.plan,execute_plan(self.plan,[self.sheet],all_records=True),self.decisions)
+        stats=verify_candidates('test',self.plan,execute_plan(self.plan,[self.sheet],all_records=True),self.decisions)
+        self.assertEqual(stats['supported'],24)
+        self.assertEqual(stats['unverified'],37)
 
     def test_missing_candidate_is_retried_without_repeating_complete_rows(self):
         calls=[]
@@ -111,9 +114,10 @@ class TalentEvidenceTests(unittest.TestCase):
             self.assertEqual(calls,[6,6,1])
             self.assertEqual(stats['supported'],13)
             usage_counter.set({'dispatched':2})
-            with self.assertRaises(ValueError):
-                verify_candidates('test',self.plan,execute_plan(self.plan,[self.sheet],all_records=True),planner)
-            self.assertEqual(calls,[6,6,1])
+            stats=verify_candidates('test',self.plan,execute_plan(self.plan,[self.sheet],all_records=True),planner)
+            self.assertEqual(stats['supported'],12)
+            self.assertEqual(stats['unverified'],1)
+            self.assertEqual(calls,[6,6,1,6,6])
         finally:
             usage_counter.reset(token)
 
@@ -121,6 +125,25 @@ class TalentEvidenceTests(unittest.TestCase):
         from app.services.talent_evidence import original_quote
         self.assertEqual(original_quote('A Chancellor’s Professor', "Chancellor's Professor"),'Chancellor’s Professor')
         self.assertIsNone(original_quote('A Chancellor’s Professor','Chancellor Professor'))
+
+    def test_compact_reason_preserves_evidence_checks_and_role_constraints(self):
+        # A rationale is diagnostic, never a substitute for a valid citation.
+        plan=TalentPlan(evidence_conditions=['主题关联','具有海外教育经历'],topic_condition='主题关联')
+        def compact(payload, invalid=False):
+            decisions=[]
+            for row in payload['candidates']:
+                refs=[p['id'] for p in row['passages'] if p['field']=='教育经历']
+                decisions.append({'id':row['id'],'checks':[
+                    {'reason':'项目经历证明主题关联','status':'supported','refs':([999] if invalid else refs)},
+                    {'reason':'没有教育证据，产业关联不能代替教育经历','status':'unknown','refs':[]}]})
+            return json.dumps({'decisions':decisions},ensure_ascii=False)
+        results=execute_plan(plan,[self.sheet],all_records=True)
+        stats=verify_candidates('主题且具有海外教育经历',plan,results,compact,max_calls=1)
+        self.assertEqual(stats['supported'],0)
+        self.assertEqual(stats['unknown'],2)
+        results=execute_plan(plan,[self.sheet],all_records=True)
+        stats=verify_candidates('主题且具有海外教育经历',plan,results,lambda p:compact(p,True),max_calls=1)
+        self.assertEqual(stats['unverified'],2)
 
     def test_actual_failure_duplicate_keys_recovers_batch_within_budget(self):
         from app.core.security import usage_counter

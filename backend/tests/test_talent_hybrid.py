@@ -40,7 +40,7 @@ class TalentHybridTests(unittest.TestCase):
             client.return_value.embed_text.side_effect=RuntimeError('unavailable')
             results,meta=hybrid_talents(self.db,'base','托卡马克',self.plan,[self.sheet])
         self.assertIn('已降级',meta['mode'])
-        self.assertEqual([r['fields']['姓名'] for r in results[0]['records']],['甲'])
+        self.assertEqual([r['fields']['姓名'] for r in results[0]['records']],['甲','乙'])
 
     def test_topic_cannot_shift_onto_foreign_university_constraint(self):
         self.assertEqual(self.plan.topic_conditions,[1])
@@ -79,4 +79,4 @@ class TalentHybridTests(unittest.TestCase):
         with patch('app.services.talent_hybrid.EmbeddingClient') as client:
             client.return_value.enabled=False
             results,_=hybrid_talents(self.db,'base','圣地亚哥大学教育经历',plan,[self.sheet])
-        self.assertEqual([r['fields']['姓名'] for r in results[0]['records']],['乙'])
+        self.assertEqual([r['fields']['姓名'] for r in results[0]['records']],['乙','甲'])

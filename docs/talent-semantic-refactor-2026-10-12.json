@@ -1,0 +1,191 @@
+{
+  "scope": "本地代码、受控计划与核验响应、只读SQLite快照；未调用线上模型或读取线上日志",
+  "capacity_boundary": [
+    {
+      "already_dispatched": 1,
+      "candidates": 18,
+      "verification_batches": [
+        6
+      ],
+      "coverage": {
+        "eligible": 18,
+        "evaluated": 6,
+        "pending": 12,
+        "unknown": 0,
+        "adjacent": 0,
+        "complete": false,
+        "ranking_proven": true,
+        "result_limit_reached": false
+      },
+      "outcome": "返回已核验结果及进度"
+    },
+    {
+      "already_dispatched": 1,
+      "candidates": 19,
+      "verification_batches": [
+        6
+      ],
+      "coverage": {
+        "eligible": 19,
+        "evaluated": 6,
+        "pending": 13,
+        "unknown": 0,
+        "adjacent": 0,
+        "complete": false,
+        "ranking_proven": true,
+        "result_limit_reached": false
+      },
+      "outcome": "返回已核验结果及进度"
+    },
+    {
+      "already_dispatched": 2,
+      "candidates": 12,
+      "verification_batches": [
+        6
+      ],
+      "coverage": {
+        "eligible": 12,
+        "evaluated": 6,
+        "pending": 6,
+        "unknown": 0,
+        "adjacent": 0,
+        "complete": false,
+        "ranking_proven": true,
+        "result_limit_reached": false
+      },
+      "outcome": "返回已核验结果及进度"
+    },
+    {
+      "already_dispatched": 2,
+      "candidates": 13,
+      "verification_batches": [
+        6
+      ],
+      "coverage": {
+        "eligible": 13,
+        "evaluated": 6,
+        "pending": 7,
+        "unknown": 0,
+        "adjacent": 0,
+        "complete": false,
+        "ranking_proven": true,
+        "result_limit_reached": false
+      },
+      "outcome": "返回已核验结果及进度"
+    }
+  ],
+  "semantic_condition_only": "accepted",
+  "rank_after_candidate_cutoff": {
+    "synthetic_true_max": 25,
+    "returned_max": 25,
+    "retrieval": null,
+    "ranking_scope": "verified_prefix",
+    "pagination": {
+      "offset": 0,
+      "page_size": 5,
+      "returned": 1,
+      "total": 1,
+      "has_more": false
+    }
+  },
+  "project_evidence_projection": {
+    "source_has_project": true,
+    "verifier_input_has_project": true
+  },
+  "institution_alias": {
+    "fixture_institution_values": [
+      "清华大学",
+      "Tsinghua University"
+    ],
+    "eligible_for_semantic_verification": 2,
+    "verification_conditions": [
+      "用户要求的当前机构符合“清华大学”；可以由其他字段记载的同一事实证明，不能仅凭偶然提及认定满足；必须是当前任职或归属，不能用毕业、过去任职或访问经历代替"
+    ]
+  },
+  "local_snapshot_counts": {
+    "talents": 1017,
+    "knowledge_chunks": 3692,
+    "knowledge_chunk_embeddings": 3678,
+    "chunk_talents": 0
+  },
+  "local_rows_controlled_plan_reproduction": [
+    {
+      "sheet": 1,
+      "rows": 906,
+      "rule_plan": null,
+      "controlled_plan": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [],
+        "evidence_conditions": [
+          "当前任职于中国以外的大学"
+        ],
+        "topic_condition": "",
+        "sort_by": "OpenAlex h-index",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false
+      },
+      "verification_batches": [
+        6
+      ],
+      "result": {
+        "matched": 6,
+        "status": "partial",
+        "coverage": {
+          "eligible": 906,
+          "evaluated": 6,
+          "pending": 900,
+          "unknown": 0,
+          "adjacent": 0,
+          "complete": false,
+          "ranking_proven": true,
+          "result_limit_reached": false
+        }
+      }
+    },
+    {
+      "sheet": 2,
+      "rows": 111,
+      "rule_plan": null,
+      "controlled_plan": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [],
+        "evidence_conditions": [
+          "当前任职于中国以外的大学"
+        ],
+        "topic_condition": "",
+        "sort_by": "OpenAlex h-index",
+        "descending": true,
+        "limit": 20,
+        "result_limit": null,
+        "match_all": false
+      },
+      "verification_batches": [
+        6
+      ],
+      "result": {
+        "matched": 6,
+        "status": "partial",
+        "coverage": {
+          "eligible": 111,
+          "evaluated": 6,
+          "pending": 105,
+          "unknown": 0,
+          "adjacent": 0,
+          "complete": false,
+          "ranking_proven": true,
+          "result_limit_reached": false
+        }
+      }
+    }
+  ]
+}

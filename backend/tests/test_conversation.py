@@ -102,17 +102,18 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(len(chat.call_args.args[1]), 2)
         self.assertEqual(response.json()['retrieval_query'], '产品发布流程')
 
-    def test_bad_rewrite_falls_back_with_context_and_memory_only_followup_is_allowed(self):
+    def test_bad_rewrite_does_not_turn_an_old_answer_into_new_retrieval_evidence(self):
         base = self.base()
         with patch.object(OpenAICompatibleProvider, 'chat', side_effect=[
             ChatResult(content='not JSON', usage=TokenUsage()),
             ChatResult(content='根据前文，先检查，再审批，最后上线。', usage=TokenUsage()),
-        ]):
+        ]) as chat:
             response = self.client.post('/api/knowledge/ask', json={
                 'question': '把上面的内容缩短一点', 'knowledge_base_id': base, 'history': self.history()})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()['sources'], [])
-        self.assertIn('产品发布流程', response.json()['retrieval_query'])
+        self.assertIn('上下文解析未完成', response.json()['answer'])
+        self.assertEqual(chat.call_count, 1)
         no_history = self.client.post('/api/knowledge/ask', json={'question': '没有内容', 'knowledge_base_id': base})
         self.assertEqual(no_history.status_code, 404)
 
@@ -180,14 +181,14 @@ class ConversationTests(unittest.TestCase):
         upload = self.client.post(f'/api/knowledge/bases/{base}/upload', files={
             'file': ('人才.xlsx', output.getvalue(), 'application/octet-stream')})
         self.assertEqual(upload.status_code, 201, upload.text)
-        query = '查询完整人才表中清华大学具身智能人才，按OpenAlex h-index降序提取'
+        query = '查询完整人才表中当前机构列包含清华大学、领域列包含具身智能的人才，按OpenAlex h-index降序提取'
         def chat(config, messages, model, key):
             if messages[0].content.startswith('你只负责'):
                 content = json.dumps({'query': query})
             elif messages[0].content.startswith('先识别用户任务'):
                 content = json.dumps({'filters': [
-                    {'field': '当前机构', 'op': 'contains', 'value': '清华大学'},
-                    {'field': '领域', 'op': 'contains', 'value': '具身智能'},
+                    {'field': '当前机构', 'op': 'contains', 'value': '清华大学', 'literal': True},
+                    {'field': '领域', 'op': 'contains', 'value': '具身智能', 'literal': True},
                 ], 'sort_by': 'OpenAlex h-index', 'descending': True, 'limit': 5})
             else:
                 content = '按完整人才表重新筛选、排序。'

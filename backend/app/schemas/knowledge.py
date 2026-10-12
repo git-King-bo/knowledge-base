@@ -61,6 +61,7 @@ class KnowledgeSearchResult(BaseModel):
     hits: list[KnowledgeChunk]
     talent_results: list[dict] = Field(default_factory=list)
     talent_notice: str | None = None
+    talent_coverage: dict = Field(default_factory=dict)
 
 
 class WebSource(BaseModel):
@@ -88,7 +89,7 @@ class TalentQueryState(BaseModel):
     snapshot_id: str | None = Field(default=None,max_length=80)
     knowledge_base_id: str | None = None
     query: str = Field(max_length=5000)
-    plan: dict = Field(default_factory=dict, max_length=11)
+    plan: dict = Field(default_factory=dict, max_length=20)
     offset: int = Field(default=0, ge=0, le=1_000_000)
     page_size: int = Field(default=5, ge=1, le=100)
     returned: int = Field(default=0, ge=0, le=100)
@@ -126,6 +127,7 @@ class RowSource(BaseModel):
 
 
 class AskResponse(BaseModel):
+    talent_coverage: dict = Field(default_factory=dict)
     query_state: TalentQueryState | None = None
     answer: str
     provider_id: str

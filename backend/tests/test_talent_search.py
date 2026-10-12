@@ -57,10 +57,10 @@ class TalentSearchTests(unittest.TestCase):
     def test_natural_language_plan_preserves_compound_filters_and_rejects_fake_columns(self):
         sources = self.roster(self.base())
         sheets, _ = read_talent_sheets(sources)
-        question = '帮我找甲大学的具身智能人才，OpenAlex h-index至少10'
+        question = '当前机构列包含甲大学，领域列包含具身智能，OpenAlex h-index至少10'
         self.assertIsNone(rule_plan(question, sheets))
-        plan = TalentPlan(filters=[TalentFilter(field='领域', value='具身智能'),
-            TalentFilter(field='当前机构', value='甲大学'), TalentFilter(field='OpenAlex h-index', op='gte', value='10')],
+        plan = TalentPlan(filters=[TalentFilter(field='领域', value='具身智能', literal=True),
+            TalentFilter(field='当前机构', value='甲大学', literal=True), TalentFilter(field='OpenAlex h-index', op='gte', value='10')],
             sort_by='OpenAlex h-index')
         result = json.loads(talent_context(question, sources, lambda schema: plan.model_dump_json()))['results'][0]
         self.assertEqual(result['matched_records'], 1)
@@ -119,7 +119,7 @@ class TalentSearchTests(unittest.TestCase):
             self.assertEqual(sum(r['returned_records'] for r in context['results']), 5)
             records = [record for result in context['results'] for record in result['records']]
             self.assertEqual([record['fields']['OpenAlex h-index'] for record in records], ['181', '180', '179', '178', '177'])
-            plan = TalentPlan(filters=[TalentFilter(field='领域', value='具身智能')], limit=100)
+            plan = TalentPlan(filters=[TalentFilter(field='领域', value='具身智能', literal=True)], limit=100)
             context = json.loads(talent_context('帮我提取具身智能领域的人才', [],
                 lambda schema: plan.model_dump_json(), max_results=5))
             self.assertEqual(sum(r['returned_records'] for r in context['results']), 5)
@@ -132,8 +132,8 @@ class TalentSearchTests(unittest.TestCase):
             self.assertEqual(result['distinct'], 2)
             self.assertEqual(result['records'], 6)
             self.assertEqual(result['groups'], {'具身智能': 5, '量子计算': 1})
-        self.assertIsNone(talent_context('找与我的项目需求相关的人才', sources,
-            lambda schema: '{"intent":"semantic"}'))
+        self.assertIn('verification', json.loads(talent_context('找与我的项目需求相关的人才', sources,
+            lambda schema: '{"intent":"semantic"}')))
         self.assertIsNone(talent_context('解释领域定义', sources,
             lambda schema: '{"intent":"document"}'))
         self.assertEqual(talent_context('计算人才平均指标', sources,
@@ -169,15 +169,15 @@ class TalentSearchTests(unittest.TestCase):
     def test_aggregate_preserves_filters_and_rejects_incomplete_sources(self):
         sources = self.roster(self.base())
         plan = {'intent': 'aggregate', 'operation': 'count',
-                'filters': [{'field': '当前机构', 'value': '甲大学'}]}
-        result = json.loads(talent_context('甲大学多少人才', sources, lambda schema: json.dumps(plan)))
+                'filters': [{'field': '当前机构', 'value': '甲大学', 'literal': True}]}
+        result = json.loads(talent_context('当前机构列包含甲大学的有多少人才', sources, lambda schema: json.dumps(plan)))
         self.assertEqual(result['aggregate']['records'], 4)
         plan.update(operation='distinct_count', field='不存在的字段')
         self.assertIn('本次未执行查询', talent_context('有多少不同字段值', sources, lambda schema: json.dumps(plan)))
         sheets, _ = read_talent_sheets(sources)
         plan.update(field='领域')
         with patch('app.services.talent_search.read_talent_sheets', return_value=(sheets, ['损坏.xlsx'])):
-            self.assertIn('不能可靠给出全库统计结果', talent_context('有多少领域', sources, lambda schema: json.dumps(plan)))
+            self.assertIn('不能可靠给出全库统计结果', talent_context('当前机构列包含甲大学的有多少领域', sources, lambda schema: json.dumps(plan)))
 
     def test_planner_contract_shares_runtime_schema_and_aliases(self):
         from app.services.talent_search import query_planner_instructions, normalized

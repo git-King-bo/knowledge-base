@@ -1,0 +1,122 @@
+{
+  "scope": "本地代码、受控计划与核验响应、只读SQLite快照；未调用线上模型或读取线上日志",
+  "capacity_boundary": [
+    {
+      "already_dispatched": 1,
+      "candidates": 18,
+      "verification_batches": [
+        6,
+        6,
+        6
+      ],
+      "outcome": "返回已核验结果"
+    },
+    {
+      "already_dispatched": 1,
+      "candidates": 19,
+      "verification_batches": [],
+      "outcome": "本次语义条件核验未完成，不能将候选人员当作已匹配结果。请缩小研究方向或稍后重试；现有资料不足以据此断言没有人才。"
+    },
+    {
+      "already_dispatched": 2,
+      "candidates": 12,
+      "verification_batches": [
+        6,
+        6
+      ],
+      "outcome": "返回已核验结果"
+    },
+    {
+      "already_dispatched": 2,
+      "candidates": 13,
+      "verification_batches": [],
+      "outcome": "本次语义条件核验未完成，不能将候选人员当作已匹配结果。请缩小研究方向或稍后重试；现有资料不足以据此断言没有人才。"
+    }
+  ],
+  "semantic_condition_only": "缺少明确的筛选条件或排序字段",
+  "rank_after_candidate_cutoff": {
+    "synthetic_true_max": 25,
+    "returned_max": 18,
+    "retrieval": {
+      "mode": "BM25（向量检索不可用，已降级）",
+      "lexical_candidates": 25,
+      "dense_candidates": 0,
+      "candidate_pool": 25,
+      "verified_pool": 18,
+      "limited": true,
+      "query": "机器人"
+    },
+    "ranking_scope": "matched_results",
+    "pagination": {
+      "offset": 0,
+      "page_size": 1,
+      "returned": 1,
+      "total": 18,
+      "has_more": true
+    }
+  },
+  "project_evidence_projection": {
+    "source_has_project": true,
+    "verifier_input_has_project": false
+  },
+  "institution_alias": {
+    "fixture_institution_values": [
+      "清华大学",
+      "Tsinghua University"
+    ],
+    "matched": 1,
+    "verification_conditions": []
+  },
+  "local_snapshot_counts": {
+    "talents": 1017,
+    "knowledge_chunks": 3692,
+    "knowledge_chunk_embeddings": 3678,
+    "chunk_talents": 0
+  },
+  "local_rows_controlled_plan_reproduction": [
+    {
+      "sheet": 1,
+      "rows": 906,
+      "rule_plan": null,
+      "controlled_plan": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [],
+        "evidence_conditions": [
+          "当前任职于中国以外的大学"
+        ],
+        "topic_condition": "",
+        "sort_by": "OpenAlex h-index",
+        "descending": true,
+        "limit": 20
+      },
+      "verification_batches": [],
+      "result": "本次语义条件核验未完成，不能将候选人员当作已匹配结果。请缩小研究方向或稍后重试；现有资料不足以据此断言没有人才。"
+    },
+    {
+      "sheet": 2,
+      "rows": 111,
+      "rule_plan": null,
+      "controlled_plan": {
+        "intent": "filter",
+        "operation": null,
+        "field": null,
+        "message": "",
+        "filters": [],
+        "concepts": [],
+        "evidence_conditions": [
+          "当前任职于中国以外的大学"
+        ],
+        "topic_condition": "",
+        "sort_by": "OpenAlex h-index",
+        "descending": true,
+        "limit": 20
+      },
+      "verification_batches": [],
+      "result": "本次语义条件核验未完成，不能将候选人员当作已匹配结果。请缩小研究方向或稍后重试；现有资料不足以据此断言没有人才。"
+    }
+  ]
+}

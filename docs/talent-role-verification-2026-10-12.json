@@ -1,0 +1,153 @@
+{
+  "date": "2026-10-12",
+  "query": "托卡马克领域人才",
+  "model": "qwen3.8-max",
+  "embedding_calls": 0,
+  "live_model_calls": 2,
+  "scope": "原请求首批六名候选，重跑规划与核验；不是全库召回率评估",
+  "before": {
+    "candidate_rank": 5,
+    "candidate": "陈锐",
+    "evidence_present": true,
+    "conditions": [
+      "从事托卡马克（Tokamak）或磁约束核聚变相关研究或工作",
+      "托卡马克领域"
+    ],
+    "checks": [
+      "related",
+      "related"
+    ],
+    "accepted": false
+  },
+  "after_plan": {
+    "intent": "filter",
+    "operation": null,
+    "field": null,
+    "message": "",
+    "filters": [],
+    "concepts": [
+      {
+        "fields": [
+          "详细个人简介",
+          "代表成果",
+          "细分关键词",
+          "领域",
+          "工作经历"
+        ],
+        "terms": [
+          "托卡马克",
+          "Tokamak",
+          "磁约束核聚变",
+          "magnetic confinement fusion",
+          "等离子体物理",
+          "plasma physics",
+          "核聚变",
+          "nuclear fusion"
+        ]
+      }
+    ],
+    "evidence_conditions": [],
+    "topic_condition": "托卡马克领域人才",
+    "sort_by": null,
+    "descending": true,
+    "limit": 20,
+    "result_limit": null,
+    "match_all": false
+  },
+  "after_verification": [
+    {
+      "name": "林志宏",
+      "checks": [
+        {
+          "reason": "林志宏是GTC（Global Toroidal Confinement）磁约束聚变等离子体模拟代码的开发者，长期从事等离子体物理与核聚变研究。托卡马克是磁约束聚变的主要装置类型，其工作属于托卡马克领域的紧密相关方向，但原文未明确提及'托卡马克'一词，故为related。",
+          "status": "related",
+          "refs": [
+            9,
+            6,
+            12
+          ]
+        }
+      ]
+    },
+    {
+      "name": "谭熠",
+      "checks": [
+        {
+          "reason": "谭熠本人长期从事球形托卡马克研究，负责SUNIST/SUNIST-2球形托卡马克装置的建设、运行与升级，并创办星环聚能推动可控核聚变产业化，原文明确支持其为托卡马克领域人才。",
+          "status": "supported",
+          "refs": [
+            5,
+            12,
+            13
+          ]
+        }
+      ]
+    },
+    {
+      "name": "钟武律",
+      "checks": [
+        {
+          "reason": "钟武律是中国环流三号总研究师，长期从事磁约束聚变实验装置研究。中国环流系列是中国的托卡马克装置，但原文仅使用'磁约束聚变''人造太阳'等表述，未直接出现'托卡马克'字样，故为related。",
+          "status": "related",
+          "refs": [
+            4,
+            26,
+            27
+          ]
+        }
+      ]
+    },
+    {
+      "name": "许敏",
+      "checks": [
+        {
+          "reason": "许敏从事磁约束聚变研究并创办东昇聚变公司，启动紧凑型实验装置建设。原文涉及磁约束聚变和聚变装置，但未明确提及托卡马克或其具体装置类型，证据指向邻近主题，故为related。",
+          "status": "related",
+          "refs": [
+            4,
+            10,
+            41
+          ]
+        }
+      ]
+    },
+    {
+      "name": "陈锐",
+      "checks": [
+        {
+          "reason": "陈锐作为星环聚能创始人兼CEO，主导发展紧凑型高温超导球形托卡马克可控聚变解决方案，且公司SUNIST-2小型球形托卡马克装置已实现首次等离子体放电，原文明确支持其为托卡马克领域人才。",
+          "status": "supported",
+          "refs": [
+            23,
+            11,
+            10
+          ]
+        }
+      ]
+    },
+    {
+      "name": "刘华军",
+      "checks": [
+        {
+          "reason": "刘华军从事应用超导工程技术研究，主持ITER专项等项目。ITER是托卡马克装置，但其本人角色聚焦于超导导体关键技术，属于托卡马克装置的支撑技术领域，原文未直接提及其从事托卡马克本体研究，故为related。",
+          "status": "related",
+          "refs": [
+            8,
+            9,
+            12
+          ]
+        }
+      ]
+    }
+  ],
+  "runtime_replay": {
+    "supported": 2,
+    "adjacent": 4,
+    "unverified": 0,
+    "chen_rui": "原文直接支持"
+  },
+  "regression_tests": {
+    "run": 39,
+    "failures": 0
+  }
+}

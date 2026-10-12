@@ -47,10 +47,12 @@ def result_scope(db,base_id,sources):
     from app.db.models import SourceIndexModel
     user=actor.get()
     if not user:
-        return None
+        from app.core.config import settings
+        if settings.auth_enabled:
+            return None
     revisions={i.source_id:(i.revision,i.indexed_revision) for i in db.scalars(
         select(SourceIndexModel).where(SourceIndexModel.source_id.in_([s.id for s in sources])))}
-    return (str(db.get_bind().url),user.id,base_id,tuple(sorted(
+    return (str(db.get_bind().url),user.id if user else 'local-no-auth',base_id,tuple(sorted(
         (s.id,str(s.updated_at),s.status,revisions.get(s.id)) for s in sources)))
 
 
@@ -59,15 +61,17 @@ def result_page(evidence,offset,limit):
     order=evidence['result_order']
     selected_order=order[offset:offset+limit]
     selected={tuple(key) for key in selected_order}
+    positions={tuple(key):i for i,key in enumerate(selected_order)}
     for group in evidence['results']:
         if 'error' in group:
             continue
         group['records']=[row for row in group.get('records',[]) if (group['source_id'],group['sheet'],row['excel_row']) in selected]
+        group['records'].sort(key=lambda row: positions[(group['source_id'],group['sheet'],row['excel_row'])])
         group['returned_records']=len(group['records'])
         group['truncated']=len(order)>offset+len(selected_order)
     evidence['result_order']=selected_order
     evidence['pagination']={'offset':offset,'page_size':limit,'returned':len(selected_order),
-        'total':len(order),'has_more':offset+len(selected_order)<len(order)}
+        'total':len(order),'has_more':offset+len(selected_order)<len(order) or bool(evidence.get('can_continue') and evidence.get('snapshot_id'))}
     trace_note('跨表排序与分页',**evidence['pagination'],matched=evidence['matched'])
     return json.dumps(evidence,ensure_ascii=False)
 
@@ -91,6 +95,11 @@ def sort_result(evidence,field,descending,scope,question,limit):
     evidence.update(matched=matched,rankable=len(ranked),missing=matched-len(ranked),
                     unranked=bool(matched and not ranked),ranking_scope='previous_results')
     evidence['result_order']=[key for _,key in (ranked if ranked else candidates)]
+    positions={tuple(key):i for i,key in enumerate(evidence['result_order'])}
+    for group in evidence['results']:
+        for row in group.get('records', []):
+            row['_search_order']=positions.get((group['source_id'],group['sheet'],row['excel_row']),len(positions))
+    evidence['can_continue']=False
     evidence['plan'].update(sort_by=field,descending=descending,limit=limit)
     evidence['snapshot_id']=save_result(scope,question,evidence['plan'],evidence)
     return result_page(evidence,0,limit)

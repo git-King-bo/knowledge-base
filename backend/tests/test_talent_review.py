@@ -26,7 +26,7 @@ class TalentReviewTests(unittest.TestCase):
             return json.dumps({'decisions':decisions})
         with patch('app.services.talent_search.read_talent_sheets',return_value=([self.sheet],[])):
             result=json.loads(talent_context('找计算机工程系人才',[],verifier,saved_plan=safe))
-        self.assertEqual([r['fields']['姓名'] for r in result['results'][0]['records']],['联合聘任者','现任教师'])
+        self.assertEqual([r['fields']['姓名'] for r in result['results'][0]['records']],['现任教师','联合聘任者'])
 
     def test_explicit_literal_column_request_remains_literal(self):
         plan=self.plan.model_copy(update={'filters':[TalentFilter(field='当前机构',value='计算机工程系',literal=True)]})
@@ -50,7 +50,7 @@ class TalentReviewTests(unittest.TestCase):
         plan=validate_plan(TalentPlan(concepts=[TalentConcept(fields=['当前机构'],terms=['大学'])],
             evidence_conditions=['当前任职大学']),[self.sheet])
         def verify(payload):
-            return json.dumps({'decisions':[{'id':r['id'],'checks':[{'status':'supported','refs':[next(p['id'] for p in r['passages'] if p['field']=='当前机构')]}]} for r in payload['candidates']]})
+            return json.dumps({'decisions':[{'id':r['id'],'checks':[{'status':'supported' if '大学' in r['fields'].get('当前机构','') else 'contradicted','refs':[next(p['id'] for p in r['passages'] if p['field']=='当前机构')]}]} for r in payload['candidates']]})
         scope=('user-a','base-a','revision-1')
         with patch('app.services.talent_search.read_talent_sheets',return_value=([self.sheet],[])):
             first=json.loads(talent_context('大学人才',[],verify,saved_plan=plan,max_results=1,snapshot_scope=scope))
@@ -60,7 +60,7 @@ class TalentReviewTests(unittest.TestCase):
         with patch('app.services.talent_search.read_talent_sheets',side_effect=AssertionError('Pagination must not read full rows')):
             second=json.loads(talent_context('大学人才',[],planner,saved_plan=saved,offset=1,max_results=1,
                 snapshot_id=first['snapshot_id'],snapshot_scope=scope))
-        self.assertEqual(second['results'][0]['records'][0]['fields']['姓名'],'现任教师')
+        self.assertEqual(second['results'][0]['records'][0]['fields']['姓名'],'联合聘任者')
         self.assertFalse(second['pagination']['has_more'])
         self.assertIsNone(load_result(first['snapshot_id'],('user-b','base-a','revision-1'),'大学人才',first['plan']))
         self.assertIsNone(load_result(first['snapshot_id'],('user-a','base-a','revision-2'),'大学人才',first['plan']))
@@ -111,11 +111,12 @@ class TalentReviewTests(unittest.TestCase):
         with patch('app.services.talent_search.read_talent_sheets',return_value=([self.sheet],[])):
             result=json.loads(talent_context('工程系按OpenAlex h-index排名',[],planner,saved_plan=plan,
                 hybrid_search=lambda *args:(groups,{'limited':True})))
-        self.assertEqual(result['ranking_scope'],'matched_results')
+        self.assertEqual(result['ranking_scope'],'verified_prefix')
         self.assertEqual([r['fields']['姓名'] for r in result['results'][0]['records']],['现任教师','联合聘任者'])
         self.assertEqual(result['rankable'],2)
         from app.services.talent_answer import render_talent_answer
-        self.assertIn('不代表全库排名',render_talent_answer(result,[]))
+        self.assertTrue(result['coverage']['complete'])
+        self.assertIn('完整候选范围',render_talent_answer(result,[]))
 
     def test_multiple_valid_references_do_not_discard_verified_candidates(self):
         from app.services.talent_evidence import verify_candidates

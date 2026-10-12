@@ -1,0 +1,265 @@
+{
+  "date": "2026-10-12",
+  "environment": "local service code + configured MySQL + qwen3.8-max",
+  "question": "托卡马克领域人才",
+  "scope": "同库906人，首批核验12人，返回5条；两次独立查询；不是全库穷尽性或P95测试",
+  "verification_cache_scope": "isolated benchmark namespace; production namespaces additionally include actor/provider configuration",
+  "samples": [
+    {
+      "mode": "cold",
+      "duration_ms": 11088,
+      "model_calls": 3,
+      "coverage": {
+        "eligible": 906,
+        "evaluated": 12,
+        "pending": 894,
+        "unknown": 3,
+        "adjacent": 4,
+        "complete": false,
+        "ranking_proven": false,
+        "result_limit_reached": false
+      },
+      "returned": [
+        "林志宏",
+        "谭熠",
+        "钟武律",
+        "许敏",
+        "陈锐"
+      ],
+      "stages": [
+        {
+          "name": "读取人才全表",
+          "duration_ms": 1412,
+          "status": "success"
+        },
+        {
+          "name": "人才全表缓存",
+          "duration_ms": 0,
+          "status": "success",
+          "hit": false
+        },
+        {
+          "name": "人才数据范围",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "人才查询计划缓存",
+          "duration_ms": 0,
+          "status": "success",
+          "hit": false
+        },
+        {
+          "name": "人才查询计划来源",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "人才查询规划",
+          "duration_ms": 2736,
+          "status": "success"
+        },
+        {
+          "name": "发送模型请求",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "模型调用 · qwen3.8-max",
+          "duration_ms": 2658,
+          "status": "success"
+        },
+        {
+          "name": "查询意图与路径",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "人才记录级召回排序",
+          "duration_ms": 327,
+          "status": "success"
+        },
+        {
+          "name": "人才词项索引缓存",
+          "duration_ms": 0,
+          "status": "success",
+          "hit": false
+        },
+        {
+          "name": "模型调用 · qwen3.7-text-embedding-flash",
+          "duration_ms": 123,
+          "status": "error"
+        },
+        {
+          "name": "人才向量检索降级",
+          "duration_ms": 0,
+          "status": "fallback"
+        },
+        {
+          "name": "人才混合召回",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "渐进人才条件核验",
+          "duration_ms": 6545,
+          "status": "success"
+        },
+        {
+          "name": "人才逐条核验缓存",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "并行核验调度",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "模型调用 · qwen3.8-max",
+          "duration_ms": 5821,
+          "status": "success"
+        },
+        {
+          "name": "模型调用 · qwen3.8-max",
+          "duration_ms": 6355,
+          "status": "success"
+        },
+        {
+          "name": "人才查询执行进度",
+          "duration_ms": 0,
+          "status": "partial"
+        },
+        {
+          "name": "跨表排序与分页",
+          "duration_ms": 0,
+          "status": "success"
+        }
+      ]
+    },
+    {
+      "mode": "warm",
+      "duration_ms": 3660,
+      "model_calls": 1,
+      "coverage": {
+        "eligible": 906,
+        "evaluated": 12,
+        "pending": 894,
+        "unknown": 2,
+        "adjacent": 5,
+        "complete": false,
+        "ranking_proven": false,
+        "result_limit_reached": false
+      },
+      "returned": [
+        "林志宏",
+        "谭熠",
+        "钟武律",
+        "许敏",
+        "陈锐"
+      ],
+      "stages": [
+        {
+          "name": "读取人才全表",
+          "duration_ms": 15,
+          "status": "success"
+        },
+        {
+          "name": "人才全表缓存",
+          "duration_ms": 0,
+          "status": "success",
+          "hit": true
+        },
+        {
+          "name": "人才数据范围",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "人才查询计划缓存",
+          "duration_ms": 0,
+          "status": "success",
+          "hit": true
+        },
+        {
+          "name": "人才查询计划来源",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "查询意图与路径",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "人才记录级召回排序",
+          "duration_ms": 76,
+          "status": "success"
+        },
+        {
+          "name": "人才词项索引缓存",
+          "duration_ms": 0,
+          "status": "success",
+          "hit": true
+        },
+        {
+          "name": "查询向量熔断",
+          "duration_ms": 0,
+          "status": "fallback"
+        },
+        {
+          "name": "人才向量检索降级",
+          "duration_ms": 0,
+          "status": "fallback"
+        },
+        {
+          "name": "人才混合召回",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "渐进人才条件核验",
+          "duration_ms": 3514,
+          "status": "success"
+        },
+        {
+          "name": "人才逐条核验缓存",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "人才查询规划",
+          "duration_ms": 3505,
+          "status": "success"
+        },
+        {
+          "name": "发送模型请求",
+          "duration_ms": 0,
+          "status": "success"
+        },
+        {
+          "name": "模型调用 · qwen3.8-max",
+          "duration_ms": 3419,
+          "status": "success"
+        },
+        {
+          "name": "人才查询执行进度",
+          "duration_ms": 0,
+          "status": "partial"
+        },
+        {
+          "name": "跨表排序与分页",
+          "duration_ms": 0,
+          "status": "success"
+        }
+      ]
+    }
+  ],
+  "tests": {
+    "run": 147,
+    "passed": 146,
+    "skipped": 1
+  },
+  "browser_verification": "unavailable: no browser provided by computer-use tool",
+  "deployment": "local only; no production deployment performed"
+}
