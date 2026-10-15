@@ -96,7 +96,13 @@ def sort_result(evidence,field,descending,scope,question,limit):
                     unranked=bool(matched and not ranked),ranking_scope='previous_results')
     previous_positions={tuple(key):i for i,key in enumerate(evidence.get('result_order',[]))}
     missing=[item for item in candidates if item[0] is None]
-    missing.sort(key=lambda item:previous_positions.get(tuple(item[1]),len(previous_positions)))
+    if evidence.get('search_mode')=='hybrid':
+        from app.services.talent_ordering import recency_key
+        fields_by_key={(g['source_id'],g['sheet'],r['excel_row']):r['fields'] for g in evidence['results'] for r in g.get('records',[])}
+        missing.sort(key=lambda item:(recency_key(fields_by_key[tuple(item[1])]),previous_positions.get(tuple(item[1]),len(previous_positions))))
+        evidence['missing_order']='updated_desc'
+    else:
+        missing.sort(key=lambda item:previous_positions.get(tuple(item[1]),len(previous_positions)))
     evidence['result_order']=[key for _,key in ranked+missing]
     positions={tuple(key):i for i,key in enumerate(evidence['result_order'])}
     for group in evidence['results']:

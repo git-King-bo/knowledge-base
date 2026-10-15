@@ -391,6 +391,12 @@ def query_plan_notice(question: str, sheets: list[TalentSheet], reason: str) -> 
             '这是系统解析失败，不表示你的问题不明确，也不表示知识库没有相关人才。请重试。')
 
 
+class TalentQueryFailure(Exception):
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code=code
+
+
 def talent_context(question: str, sources, planner=None, *, max_results: int = 5, saved_plan: TalentPlan | None = None, offset: int = 0, hybrid_search=None, snapshot_id=None, snapshot_scope=None) -> str | None:
     from app.services.talent_context_update import ContextChangeUnresolved, review_instructions
     from app.services.agent_trace import trace_note, trace_stage
@@ -417,9 +423,6 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
     if not sheets:
         trace_note('人才路径选择', status='skipped', reason='没有可用人才表，进入知识片段检索')
         return None
-    if getattr(planner, 'fast_search', False) and getattr(planner, 'search_db', None) is not None:
-        from app.services.talent_search_index import ready_index
-        ready_index(planner.search_db, sheets, snapshot_scope)
     from app.services.query_cache import plan_cache
     import hashlib
     namespace=getattr(planner,'cache_namespace',None)
@@ -428,13 +431,29 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
     plan_key=hashlib.sha256(repr((namespace,getattr(planner,'fast_search',False),getattr(planner,'plan_context_key',None),snapshot_scope,
                                  question,contract,review_instructions())).encode()).digest() if namespace and snapshot_scope else None
     cached_plan=plan_cache.get(plan_key) if plan_key and not saved_plan else None
+    local_plan=None
+    if (not saved_plan and not cached_plan and getattr(planner,'fast_search',False)
+            and not getattr(planner,'has_unstructured_history',False)):
+        from app.services.talent_structured_router import compile_structured
+        local_plan=compile_structured(question,sheets)
+        if local_plan is not None:
+            previous=getattr(planner,'previous_plan',None)
+            if isinstance(previous,dict) and previous:
+                from app.services.talent_context_update import inherit_plan
+                local_plan=inherit_plan(local_plan,previous,question)
+            local_plan=validate_plan(local_plan,sheets)
+            trace_note('本地结构化编译',route='structured',model_call=False,conditions=local_plan.evidence_conditions,sort_by=local_plan.sort_by)
     plan = validate_plan(saved_plan, sheets) if saved_plan else (
         validate_plan(TalentPlan.model_validate(cached_plan),sheets) if cached_plan else
-        (None if getattr(planner,'requires_context',False) else rule_plan(question, sheets)))
+        (local_plan if getattr(planner,'fast_search',False) else
+         (None if getattr(planner,'requires_context',False) else rule_plan(question, sheets))))
     trace_note('人才查询计划缓存', hit=cached_plan is not None)
     trace_note('人才查询计划来源', source='复用上一页计划' if saved_plan else '本地规则' if plan else '需要模型识别意图')
     failure_reason = 'invalid_plan' if planner else 'planner_unavailable'
     if plan is None and planner:
+        if getattr(planner,'fast_search',False) and getattr(planner,'search_db',None) is not None:
+            from app.services.talent_search_index import ready_index
+            ready_index(planner.search_db,sheets,snapshot_scope)
         schema = {"fields": sorted({field for sheet in sheets for field in sheet.headers if field}),
                   "domains": sorted({row['fields'].get('领域', '') for sheet in sheets for row in sheet.rows} - {''})}
         if getattr(planner, 'fast_search', False):
@@ -451,7 +470,8 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
                 raise ValueError('No planner response')
             plan = parse_model_plan(raw)
             if getattr(planner, 'fast_search', False) and plan.search:
-                from app.services.talent_search_schema import SearchSpec, SearchPredicate
+                from app.services.talent_search_schema import SearchSpec, SearchPredicate, bind_relations
+                plan=bind_relations(plan, question)
                 predicates=plan.search.predicates
                 topic_nodes=[p for p in predicates if p.kind=='topic']
                 if plan.search.topic_mode=='any' and len(topic_nodes)>1:
@@ -487,6 +507,8 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
     if plan is None:
         notice = query_plan_notice(question, sheets, failure_reason)
         trace_note('查询未执行', status='skipped', reason=notice, code=failure_reason)
+        if getattr(planner,'fast_search',False) is True:
+            raise TalentQueryFailure(notice,failure_reason)
         return notice
     trace_note('查询意图与路径', intent=plan.intent, operation=plan.operation, field=plan.field,
                filters=[item.model_dump() for item in plan.filters], reason=plan.message)

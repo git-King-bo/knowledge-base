@@ -78,17 +78,17 @@ class OpenAICompatibleProvider(AIProvider):
 
     def _chat_reserved(self, config, messages, model=None, api_key=None):
         """Network only. Caller must reserve budget before scheduling this method."""
+        from app.ai.base import json_max_output_tokens, json_output_requested
         selected_model = model or config.default_model
         payload = {
             "model": selected_model,
             "messages": [message.model_dump() for message in messages],
             "stream": False,
-            "temperature": 0.2,
-            "max_tokens": settings.model_max_output_tokens,
+            "temperature": 0.0 if json_output_requested.get() else 0.2,
+            "max_tokens": json_max_output_tokens.get() or settings.model_max_output_tokens,
         }
 
         payload.update(self._thinking_parameters(config, payload["model"]))
-        from app.ai.base import json_output_requested
         host = (urlsplit(config.base_url).hostname or '').lower()
         if json_output_requested.get() and (host.endswith('.aliyuncs.com') or host == 'api.openai.com'):
             payload['response_format'] = {'type': 'json_object'}

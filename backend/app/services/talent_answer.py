@@ -117,12 +117,16 @@ def render_search_answer(evidence, rows):
     total=evidence['matched']; page=evidence['pagination']; plan=evidence['plan']
     parts=[f"本次检索返回 {total} 条{'待核验候选' if unresolved else '相关人才记录'}。" if total else
            '本次未召回符合当前筛选范围的相关记录，不代表资料中不存在相关人才。']
+    conditions=list(dict.fromkeys(plan.get('evidence_conditions',[])))
+    if conditions:
+        parts.append('当前筛选条件：'+'；'.join(cell(c) for c in conditions)+'。')
     if unresolved:
         parts.append('以下条件尚无法可靠执行，结果不能视为已满足这些要求：'+'；'.join(cell(c) for c in unresolved))
     if plan['sort_by'] and total:
         parts.append(f"其中 {evidence['rankable']} 条有 {cell(plan['sort_by'])}，按{'从高到低' if plan['descending'] else '从低到高'}排列。")
         if evidence['missing']:
-            parts.append(f"另有 {evidence['missing']} 条缺少该指标，仍保留在后，沿用相关性顺序。")
+            parts.append(f"另有 {evidence['missing']} 条缺少该指标，仍保留在后，"+
+                ('按资料更新时间从新到旧排列；无有效更新时间的排在最后并保留原顺序。' if evidence.get('missing_order')=='updated_desc' else '保留原结果顺序。'))
         parts.append('排序仅覆盖当前召回结果，不代表全库精确排名。')
     unknown=evidence.get('coverage',{}).get('unknown',0)
     if unknown:

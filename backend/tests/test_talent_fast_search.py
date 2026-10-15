@@ -55,6 +55,13 @@ class FastSearchTests(unittest.TestCase):
         self.assertEqual(result['unresolved_conditions'],['complex employment relation'])
         self.assertFalse(result['coverage']['complete'])
 
+    def test_only_unresolved_condition_does_not_return_the_entire_database(self):
+        plan=TalentPlan(evidence_conditions=['subjective potential'],search=SearchSpec(predicates=[
+            SearchPredicate(condition='subjective potential',kind='unresolved')]))
+        result=self.run_search(plan)
+        self.assertEqual(result['matched'],0)
+        self.assertEqual(result['unresolved_conditions'],['subjective potential'])
+
     def test_topic_intersection_requires_both_groups(self):
         from app.services.talent_search_schema import SearchSpec
         plan=TalentPlan(evidence_conditions=['a','b'],search=SearchSpec(predicates=[
@@ -147,7 +154,7 @@ class FastSearchApiTests(unittest.TestCase):
             names={first['row_sources'][0]['fields']['姓名'],second['row_sources'][0]['fields']['姓名']}
             self.assertEqual(names,{'A','B'})
             sorted_result=self.client.post('/api/knowledge/ask',json={'question':'按OpenAlex h-index排序','knowledge_base_id':base,'history':history}).json()
-            self.assertEqual(model.call_count,2)
+            self.assertEqual(model.call_count,1)  # Sorting adds no model request.
             self.assertEqual([r['fields']['姓名'] for r in sorted_result['row_sources']],['A','B'])
             self.assertEqual(sorted_result['query_state']['plan']['evidence_conditions'],['overseas','protein or tokamak'])
 

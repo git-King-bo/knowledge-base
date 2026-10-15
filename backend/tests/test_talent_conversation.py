@@ -237,6 +237,6 @@ class TalentConversationTests(unittest.TestCase):
                 'history':[{'question':'当前任职清华大学的人才','answer':first['answer'],'query_state':first['query_state']}]})
             self.assertEqual(second.status_code,200,second.text)
             self.assertEqual(read.call_count,1)
-            self.assertEqual(len(planned),2)
-            self.assertEqual(second.json()['query_state']['plan']['evidence_conditions'],['当前任职清华大学'])
+            self.assertEqual(len(planned),0)  # Filter and sort are both structured operations.
+            self.assertEqual(second.json()['query_state']['plan']['evidence_conditions'],['当前机构属于清华大学'])
             self.assertEqual([r['fields']['OpenAlex h-index'] for r in second.json()['row_sources']],['80','79','78','77','76'])

@@ -36,7 +36,7 @@ from app.services.ingestion import parse_uploaded_file, split_into_chunks
 from app.services.web_search import WebSearchClient
 from app.services.spreadsheet_stats import needs_spreadsheet_stats, summarize_workbook
 from app.services.file_preview import preview_source
-from app.services.talent_search import talent_context, TalentPlan, query_planner_instructions
+from app.services.talent_search import talent_context, TalentPlan, TalentQueryFailure, query_planner_instructions
 from app.services.talent_answer import PreparedTalentAnswer, next_page_state, prepare_response, render_aggregate_answer
 from app.services.agent_trace import capture_trace, traced, trace_stage, trace_note, trace_output, trace_id
 from app.services.conversation import bounded_history, history_messages, resolve_retrieval_query, RetrievalClarification
@@ -321,7 +321,8 @@ async def upload_knowledge_file(
     return await _ingest_upload(file=file, repo=repo)
 
 
-def _talent_query_planner(db, question, provider, api_key, model, knowledge_base_id, request_context=None, *, fast_search=None):
+def _talent_query_planner(db, question, provider, api_key, model, knowledge_base_id, request_context=None, *, fast_search=None,
+                          configuration_error=None):
     ai_repo = AIRepository(db)
     fast = settings.talent_fast_search if fast_search is None else fast_search
     @traced('人才查询规划')
@@ -347,11 +348,16 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
         result = None
         failure = ''
         try:
-            from app.ai.base import json_output_requested
+            if configuration_error:
+                raise RuntimeError(configuration_error)
+            from app.ai.base import json_max_output_tokens, json_output_requested
             token = json_output_requested.set(True)
+            limit_token = json_max_output_tokens.set(
+                settings.structured_model_max_output_tokens if fast and not schema.get('phase') else None)
             try:
                 result = ai_provider_registry.resolve(provider.provider).chat(provider, messages, model or provider.default_model, api_key)
             finally:
+                json_max_output_tokens.reset(limit_token)
                 json_output_requested.reset(token)
             return result.content
         except Exception as exc:
@@ -366,6 +372,7 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
                 latency_ms=int((perf_counter() - started) * 1000))
 
     plan_talent_query.previous_plan=(request_context or {}).get('previous_plan')
+    plan_talent_query.has_unstructured_history=bool((request_context or {}).get('previous_questions'))
     plan_talent_query.review_context=plan_talent_query
     plan_talent_query.original_question=(request_context or {}).get('original_question',question)
     plan_talent_query.fast_search = fast
@@ -416,8 +423,11 @@ def search_knowledge(
     credentials = AIRepository(db).get_default_provider_credentials()
     planner = _talent_query_planner(db, q, *credentials, None, knowledge_base_id) if credentials else None
     from app.services.talent_hybrid import hybrid_talents
-    structured = talent_context(q, repo.list_active_spreadsheet_sources(knowledge_base_id), planner, max_results=top_k,
-        hybrid_search=lambda question,plan,sheets:hybrid_talents(db,knowledge_base_id,question,plan,sheets))
+    try:
+        structured = talent_context(q, repo.list_active_spreadsheet_sources(knowledge_base_id), planner, max_results=top_k,
+            hybrid_search=lambda question,plan,sheets:hybrid_talents(db,knowledge_base_id,question,plan,sheets))
+    except TalentQueryFailure as exc:
+        raise HTTPException(status_code=503 if exc.code=='planner_unavailable' else 502,detail=str(exc)) from exc
     evidence = json.loads(structured) if structured and structured.startswith('{') else {}
     if 'aggregate' in evidence:
         return KnowledgeSearchResult(query=q, hits=[], talent_results=[], talent_notice=render_aggregate_answer(evidence),
@@ -480,27 +490,45 @@ def _prepare_ask(payload: AskRequest, db: Session):
             and previous_state.knowledge_base_id==payload.knowledge_base_id and previous_state.snapshot_id):
         previous_result=load_result(previous_state.snapshot_id,snapshot_scope,previous_state.query,previous_state.plan)
     # Re-sorting an unfinished candidate prefix is not a new full-scope ranking.
-    if previous_result and not previous_result.get('coverage', {}).get('complete', True):
+    if (previous_result and previous_result.get('search_mode')!='hybrid'
+            and not previous_result.get('coverage', {}).get('complete', True)):
         previous_result = None
     sort_fields=sorted({field for group in previous_result['results'] for row in group.get('records',[])
                         for field in row['fields']}) if previous_result else None
     result_action={}
     fast_search=settings.talent_fast_search and payload.talent_search_mode=='search'
+    if fast_search and sort_fields:
+        from app.services.talent_structured_router import sort_action
+        result_action=sort_action(payload.question,sort_fields) or {}
+        if result_action:
+            trace_note('复用结果排序意图',route='snapshot_sort',model_call=False,**result_action)
     combined_planning = bool(talent_sources and not page_state and not payload.continuation and
         (fast_search or (settings.talent_combined_planning and previous_state and not sort_fields)))
-    if combined_planning:
+    if combined_planning or result_action:
         retrieval_query = payload.question
         trace_note('理解追问与查询改写', status='skipped', reason='与人才查询规划合并；保留上一轮完整条件计划')
     else:
         retrieval_query = page_state.query if page_state else resolve_retrieval_query(payload, history, provider, api_key, db,
             sort_fields=sort_fields,result_action=result_action)
     trace_note('确定检索问题', original=payload.question, query=retrieval_query, reused_page_plan=bool(page_state))
-    plan_talent_query = _talent_query_planner(db, retrieval_query, provider, api_key, payload.model, payload.knowledge_base_id,
+    planner_provider,planner_key,planner_model=provider,api_key,payload.model
+    planner_error=None
+    if fast_search and talent_sources:
+        planner_record=(ai_repo.get_provider_credentials(settings.talent_planner_provider_id)
+                        if settings.talent_planner_provider_id else ai_repo.get_default_provider_credentials())
+        if planner_record:
+            planner_provider,planner_key=planner_record
+            planner_model=settings.talent_planner_model or planner_provider.default_model
+            trace_note('选择人才规划模型',provider_id=planner_provider.id,model=planner_model,fixed=True)
+        else:
+            planner_error='人才查询规划模型未配置'
+            trace_note('选择人才规划模型',status='unavailable',provider_id=settings.talent_planner_provider_id)
+    plan_talent_query = _talent_query_planner(db, retrieval_query, planner_provider, planner_key, planner_model, payload.knowledge_base_id,
         request_context={'original_question':payload.question,
                          'previous_question':history[-1].question if history else None,
                          'previous_questions':[turn.question for turn in history] if not previous_state else [],
                          'previous_plan':history[-1].query_state.plan if history and history[-1].query_state else None},
-        fast_search=fast_search)
+        fast_search=fast_search,configuration_error=planner_error)
     plan_talent_query.requires_context = bool(getattr(plan_talent_query,'previous_plan',None))
     from app.services.talent_hybrid import hybrid_talents
     try:
@@ -513,6 +541,9 @@ def _prepare_ask(payload: AskRequest, db: Session):
                 offset=page_state.offset + page_state.returned if page_state else 0,
                 snapshot_id=page_state.snapshot_id if page_state else None,snapshot_scope=snapshot_scope,
                 hybrid_search=lambda question,plan,sheets:hybrid_talents(db,payload.knowledge_base_id,question,plan,sheets))
+    except TalentQueryFailure as exc:
+        trace_note('检索执行失败',status='error',code=exc.code)
+        raise HTTPException(status_code=503 if exc.code=='planner_unavailable' else 502,detail=str(exc)) from exc
     except ValueError:
         raise RetrievalClarification('人才表的字段已变化，请重新输入筛选条件后查询。', provider.id, payload.model or provider.default_model)
     if page_state and not structured_talents:

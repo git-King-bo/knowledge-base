@@ -11,6 +11,51 @@ class SearchPredicate(BaseModel):
     op: Literal['contains_any', 'equals_any', 'gte', 'lte'] = 'contains_any'
     values: list[str] = Field(default_factory=list, max_length=80)
     related_values: list[str] = Field(default_factory=list, max_length=24)
+    relation: Literal['current_affiliation', 'education', 'employment_history', 'employment_experience', 'any_affiliation'] | None = None
+    relation_evidence: str = Field(default='', max_length=500)
+
+
+RELATION_FIELDS = {
+    'current_affiliation': ['当前机构'],
+    'education': ['教育经历'],
+    'employment_history': ['工作经历'],
+    'employment_experience': ['当前机构', '工作经历'],
+    'any_affiliation': ['当前机构', '教育经历', '工作经历'],
+}
+
+
+def predicate_fields(predicate):
+    """Bind relation semantics to source columns; mixed columns cannot widen current affiliation."""
+    if predicate.kind == 'metadata':
+        if predicate.relation:
+            return RELATION_FIELDS[predicate.relation]
+        if '当前机构' in predicate.fields:
+            return RELATION_FIELDS['current_affiliation']
+    return predicate.fields
+
+
+def bind_relations(plan, question):
+    if not plan.search:
+        return plan
+    predicates=[]
+    for predicate in plan.search.predicates:
+        if predicate.relation:
+            if predicate.kind != 'metadata':
+                raise ValueError('Affiliation relations must be metadata predicates')
+            if predicate.relation != 'current_affiliation' and (
+                    not predicate.relation_evidence.strip() or predicate.relation_evidence not in question):
+                raise ValueError('Historical affiliation requires evidence from the current question')
+        relation=predicate.relation
+        if predicate.kind == 'metadata' and not relation and '当前机构' in predicate.fields:
+            relation='current_affiliation'
+        if relation and predicate.op not in {'contains_any', 'equals_any'}:
+            raise ValueError('Affiliation relations require text membership')
+        predicates.append(predicate.model_copy(update={
+            'relation': relation, 'fields': list(predicate_fields(predicate)),
+            # Source affiliation cells may contain departments or multiple
+            # appointments. Institution membership is not whole-cell equality.
+            'op': 'contains_any' if relation else predicate.op}))
+    return plan.model_copy(update={'search': plan.search.model_copy(update={'predicates': predicates})})
 
 
 class SearchSpec(BaseModel):
@@ -62,7 +107,16 @@ def fast_query_instructions():
         '事实用kind=metadata，equals_any匹配完整字段，contains_any匹配字段内字面值，gte/lte匹配数值。'
         '@current_region是当前所在国家／城市第一个地域段。当前海外用该字段+equals_any，values从schema.region_values选择明确中国以外的值，不猜未知地域。'
         '地域、机构和角色必须同时满足主题要求。当前任职不可用历史教育经历代替。'
+        '机构条件必须与研究主题拆成不同predicate。没有明确历史关系的学校/公司人才查询，默认当前所属机构，'
+        '用kind=metadata、relation=current_affiliation、fields=[当前机构]，不得扩到校友、曾任职或合作关系。'
+        '明确毕业/就读/校友用relation=education，明确曾经任职用employment_history，明确任意当前或历史联系才用any_affiliation。'
+        '查询任职经历但没有明确排除现任（例如工作过）用employment_experience，包含当前机构和工作经历，不能使用教育经历或全文关键词替代任职证据。'
+        '非当前机构关系必须在relation_evidence逐字引用本轮表达该历史关系的原话，不能引用一个学校名称代替关系要求。'
+        '字段由程序按relation绑定；当前机构、教育经历和工作经历不能随意混用。'
+        '机构关系表示成员归属，允许当前机构单元格包含该大学的院系或多个当前任职机构，不要求整格与大学名称完全相等。'
         '复杂经历、否定事实等不能可靠执行时kind=unresolved，必须保留条件，不能改写成宽泛关键词。'
+        '潜力、优秀、顶尖、影响力、跨学科程度、创业能力等评价性判断不是资料中的字面研究主题，必须kind=unresolved；'
+        '不能生成若干带这些评价词的values假装可精确匹配。机构、地域等可执行条件仍拆成metadata，用于限定待核验范围。'
         'sort_by必须是真实字段，Openlex即OpenAlex，默认descending=true，不混用Google Scholar。result_limit仅用户明确前N时填写。'
         '无条件全部人才用match_all=true。统计operation为count/distinct_count/group_count，后两种field必填。'
         'previous_plan中未提到的条件会由程序保留，本轮只输出新增或变更。新增主题默认与旧主题AND。'

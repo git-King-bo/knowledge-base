@@ -13,6 +13,7 @@ from app.services.talent_hybrid import bm25, RESEARCH_FIELDS
 from app.services.talent_results import save_result, result_page
 from app.services.talent_search_index import ready_index, person_scores
 from app.services.embeddings import EmbeddingClient, EmbeddingConfig
+from app.services.talent_search_schema import predicate_fields
 
 
 def region_value(fields):
@@ -22,7 +23,8 @@ def region_value(fields):
 
 
 def test_predicate(fields, predicate):
-    values=[region_value(fields) if f=='@current_region' else str(fields.get(f,'')).strip() for f in predicate.fields]
+    bound_fields=predicate_fields(predicate)
+    values=[region_value(fields) if f=='@current_region' else str(fields.get(f,'')).strip() for f in bound_fields]
     values=[v for v in values if v and v.strip().casefold() not in {'—','-','n/a','unknown','未知','不详','未提供'}]
     if not values:
         return None
@@ -37,7 +39,7 @@ def test_predicate(fields, predicate):
     if predicate.op=='equals_any':
         # 国家／城市 is a compound source field; country-only values target its
         # explicit first component, never a country inferred from biography.
-        if '所在国家／城市' in predicate.fields:
+        if '所在国家／城市' in bound_fields:
             observed.append(normalized(region_value(fields)))
         return any(v==e for v in observed for e in expected)
     return any(e in v for v in observed for e in expected)
@@ -53,7 +55,7 @@ def validate_compiled(plan, sheets):
         if predicate.kind!='unresolved':
             if not predicate.values or any(not v.strip() for v in predicate.values):
                 raise ValueError('Empty search predicate')
-            if not predicate.fields or any(f not in headers|{'@current_region'} for f in predicate.fields):
+            if not predicate_fields(predicate) or any(f not in headers|{'@current_region'} for f in predicate_fields(predicate)):
                 raise ValueError('Unknown search predicate field')
             if predicate.op in {'gte','lte'} and (len(predicate.values)!=1 or number_value(predicate.values[0]) is None):
                 raise ValueError('Invalid numeric search predicate')
@@ -147,7 +149,7 @@ def search_talents(question, plan, sheets, failures, planner, scope, offset, pag
     # Apply before top-k: unrelated dense neighbours must not evict lexical hits.
     unsupported=sum(not supported[i] for i in fused) if topics else 0
     selected=(sorted((i for i in fused if supported[i]),key=lambda i:fused[i],reverse=True)[:limit]
-              if topics else list(range(len(entries))))
+              if topics else ([] if unresolved and not metadata else list(range(len(entries)))))
     rerank_status='not_needed'
     if topics:
         from app.services.talent_rerank import rerank
@@ -156,9 +158,10 @@ def search_talents(question, plan, sheets, failures, planner, scope, offset, pag
                 getattr(planner,'search_db',None),getattr(planner,'search_base',None))
         selected=[selected[i] for i in reordered]
     if plan.sort_by:
+        from app.services.talent_ordering import recency_key
         def metric(i):
             value=number_value(entries[i][1]['fields'].get(plan.sort_by,''))
-            return value is None,(-value if plan.descending else value) if value is not None else 0
+            return value is None,(-value if plan.descending else value) if value is not None else recency_key(entries[i][1]['fields'])
         selected.sort(key=metric)
     if plan.result_limit is not None:selected=selected[:plan.result_limit]
     for group in groups:
@@ -167,6 +170,15 @@ def search_talents(question, plan, sheets, failures, planner, scope, offset, pag
     for rank,i in enumerate(selected):
         group,row,_=entries[i]
         snippets=[]
+        for p in metadata:
+            for field in predicate_fields(p):
+                source_field='所在国家／城市' if field=='@current_region' else field
+                text=str(row['fields'].get(source_field,''))
+                term=next((v for v in p.values if normalized(v) in normalized(text)),None)
+                if term:
+                    at=max(0,text.casefold().find(term.casefold())-40)
+                    snippets.append(source_field+'：'+text[at:at+220])
+                    break
         for p in topics:
             for field in dict.fromkeys(p.fields+sorted(RESEARCH_FIELDS)):
                 text=str(row['fields'].get(field,''))
@@ -190,6 +202,7 @@ def search_talents(question, plan, sheets, failures, planner, scope, offset, pag
         'result_order':order,'rankable':rankable if plan.sort_by else None,
         'missing':len(selected)-rankable if plan.sort_by else None,'unranked':bool(plan.sort_by and selected and not rankable),
         'ranking_scope':'matched_results' if plan.sort_by else None,'verification':None,'retrieval':retrieval,
+        'missing_order':'updated_desc',
         'unreadable_files':failures,'unresolved_conditions':unresolved,'can_continue':False,
         'coverage':{'eligible':corpus_count,'evaluated':0,'pending':0,'unknown':unknown,'adjacent':0,
             'complete':not topics and not unresolved and not failures and not unknown,

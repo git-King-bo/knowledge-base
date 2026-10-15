@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--trace-id',required=True)
     parser.add_argument('--query')
     parser.add_argument('--repeat',type=int,default=3)
+    parser.add_argument('--conversation',action='store_true',help='Replay original preceding questions with newly computed query states')
     parser.add_argument('--output',required=True)
     args=parser.parse_args()
     if not args.live or not 1<=args.repeat<=5:parser.error('--live and repeat 1–5 required')
@@ -30,18 +31,24 @@ def main():
         user=db.get(UserModel,trace.user_id)
         if user is None or not user.enabled:parser.error('Trace user unavailable')
         request=json.loads(trace.request_json)
+        questions=[args.query or trace.question]
+        if args.conversation:
+            received=next((s.get('data',{}) for s in json.loads(trace.stages_json) if s.get('name')=='接收页面请求'),{})
+            questions=[t['question'] for t in received.get('history',[])]+questions
         token=actor.set(user);db.info['actor']=(user.id,user.role)
         try:
-            for i in range(args.repeat):
+            history=[]
+            for i in range(len(questions) if args.conversation else args.repeat):
                 counter={'dispatched':0,'calls':0,'tokens':0,'unknown':False}
                 ct=usage_counter.set(counter);started=perf_counter()
-                payload=AskRequest(question=args.query or trace.question,knowledge_base_id=trace.knowledge_base_id,
-                    provider_id=request['provider_id'],model=request['model'],talent_search_mode='search')
+                payload=AskRequest(question=questions[i] if args.conversation else questions[0],knowledge_base_id=trace.knowledge_base_id,
+                    provider_id=request['provider_id'],model=request['model'],talent_search_mode='search',history=history if args.conversation else [])
                 try:
                     _prepare_ask(payload,db)
                     raise RuntimeError('Expected personnel response')
                 except PreparedTalentAnswer as answer:
                     response=answer.response
+                    elapsed_ms=round((perf_counter()-started)*1000)
                     from app.services.talent_results import load_result,result_scope
                     from app.repositories.sqlite import KnowledgeIngestionRepository
                     sources=KnowledgeIngestionRepository(db).list_active_spreadsheet_sources(trace.knowledge_base_id)
@@ -49,12 +56,14 @@ def main():
                     state=response.query_state
                     snapshot=load_result(state.snapshot_id,scope,state.query,state.plan)
                     item={'iteration':i+1,'query':payload.question,'model':request['model'],
-                        'elapsed_ms':round((perf_counter()-started)*1000),'model_calls':counter['dispatched'],
+                        'elapsed_ms':elapsed_ms,'model_calls':counter['dispatched'],
                         'returned':len(response.row_sources),'names':[r.fields.get('姓名') for r in response.row_sources],
                         'plan':state.plan,'retrieval':snapshot.get('retrieval') if snapshot else None,
                         'unresolved':snapshot.get('unresolved_conditions') if snapshot else None,
                         'matched':snapshot.get('matched') if snapshot else None}
                     report.append(item);print(json.dumps(item,ensure_ascii=False),flush=True)
+                    if args.conversation:
+                        history.append({'question':payload.question,'answer':response.answer,'query_state':state.model_dump()})
                 finally:usage_counter.reset(ct)
         finally:actor.reset(token)
     with open(args.output,'w') as output:json.dump(report,output,ensure_ascii=False,indent=2)
