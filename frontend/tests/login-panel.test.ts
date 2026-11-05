@@ -116,7 +116,7 @@ test('reduced-motion initial load stays still, hidden tabs stop rendering and re
 })
 
 
-test('successful login holds the tunnel through its dissolve and completes exactly once', async t => {
+test('successful login keeps its layer until its own opacity transition ends, exactly once', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => Response.json({ id: 'tunnel-user', username: 'admin', role: 'admin', enabled: true })
@@ -129,12 +129,28 @@ test('successful login holds the tunnel through its dissolve and completes exact
     assert.equal(currentUser.value?.id, 'tunnel-user', 'workspace data can load behind the tunnel')
     assert.ok(f.host.querySelector('.is-entering'))
     assert.ok(f.host.querySelector('.login-layout')!.hasAttribute('inert'))
-    t.mock.timers.tick(3599); await drain()
+    const stage = f.host.querySelector('.fairy-painting')!.getBoundingClientRect()
+    const page = f.host.querySelector('.login-page')!.getBoundingClientRect()
+    const tunnel = f.host.querySelector<HTMLElement>('.knowledge-orbit')!
+    assert.equal(tunnel.dataset.travelling, 'true')
+    assert.ok(Math.abs(Number(tunnel.dataset.originX) - (stage.left - page.left + stage.width * 500 / 1586)) < .001, 'tunnel shares the illustration orbit center')
+    assert.ok(Math.abs(Number(tunnel.dataset.originY) - (stage.top - page.top + stage.height * 384 / 992)) < .001)
+
+    t.mock.timers.tick(2299); await drain()
     assert.equal(f.host.querySelector('.is-revealing'), null)
     t.mock.timers.tick(1); await drain()
     assert.ok(f.host.querySelector('.is-revealing'))
     assert.deepEqual(f.phases, ['entering'])
-    t.mock.timers.tick(1200); await drain()
+    t.mock.timers.tick(900); await drain()
+    assert.deepEqual(f.phases, ['entering'], 'elapsed time alone must not cut off the last visible frame')
+    const transition = (propertyName: string) => Object.defineProperty(new Event('transitionend', { bubbles: true }), 'propertyName', { value: propertyName })
+    f.host.querySelector('.login-gateway')!.dispatchEvent(transition('opacity'))
+    f.host.querySelector('.login-page')!.dispatchEvent(transition('transform'))
+    assert.deepEqual(f.phases, ['entering'], 'child transitions and other properties cannot end the overlay')
+    f.host.querySelector('.login-page')!.dispatchEvent(transition('opacity'))
+    await drain()
+    assert.deepEqual(f.phases, ['entering', 'entered'])
+    t.mock.timers.tick(1000); await drain()
     assert.deepEqual(f.phases, ['entering', 'entered'])
     window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }))
     assert.deepEqual(f.phases, ['entering', 'entered'])
@@ -157,4 +173,22 @@ test('reduced motion bypasses the tunnel and Escape releases a running entrance'
     } finally { f.dispose(); currentUser.value = undefined }
   }
   globalThis.fetch = originalFetch
+})
+
+
+test('a missing opacity transition event releases the entrance after the fade fallback', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({ id: 'fallback-user', username: 'admin', role: 'admin', enabled: true })
+  const f = mount({ canvas: true })
+  const drain = async () => { for (let i = 0; i < 30; i++) await nextTick() }
+  try {
+    f.host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await drain()
+    t.mock.timers.tick(2300); await drain()
+    t.mock.timers.tick(1149); await drain()
+    assert.deepEqual(f.phases, ['entering'])
+    t.mock.timers.tick(1); await drain()
+    assert.deepEqual(f.phases, ['entering', 'entered'])
+  } finally { f.dispose(); globalThis.fetch = originalFetch; currentUser.value = undefined }
 })
