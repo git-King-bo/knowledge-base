@@ -1,0 +1,39 @@
+services:
+  backend:
+    image: knowledge-company-backend:${KB_BACKEND_VERSION:-${KB_VERSION:?KB_VERSION required}}
+    env_file: company.env
+    environment:
+      APP_ENV: production
+      APP_AUTH_ENABLED: "true"
+      APP_DATABASE_MODE: sqlite
+      DATABASE_URL: sqlite:////data/knowledge_base.db
+      APP_SECURITY_DIR: /data/security
+      APP_UPLOAD_DIR: /data/uploads
+      APP_CORS_ORIGINS: http://future.ops.originhub.tech
+    volumes:
+      - ../data:/data
+    restart: unless-stopped
+    stop_grace_period: 300s
+    mem_limit: 1000m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready',timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      start_period: 60s
+      retries: 12
+  web:
+    image: knowledge-company-frontend:${KB_FRONTEND_VERSION:-${KB_VERSION:?KB_VERSION required}}
+    environment:
+      API_UPSTREAM: backend:8001
+    ports:
+      - "127.0.0.1:18080:8080"
+    depends_on:
+      backend: {condition: service_healthy}
+    restart: unless-stopped
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}

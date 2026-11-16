@@ -32,13 +32,13 @@
 
 ## 生产部署
 
-- 复制 `deploy/production.env.example` 为 `deploy/production.env`，配置实际模型域名白名单、CORS和模型凭据。不要提交此文件。
-- `SITE_ADDRESS=knowledge.example.com docker compose -f deploy/compose.yaml up -d --build`。域名需指向服务器，开放80/443；后端不直接暴露公网端口。
+- 当前部署使用 companyOps 的独立 SQLite 和 Docker，操作入口及配置见 [Docker 部署说明](../deploy/COMPANY-部署说明.md)。
+- 在项目根目录运行 `bash deploy/deploy.sh`，本机构建镜像后通过 SSH 上传并启动，无需云镜像仓库。服务器配置文件为 `/opt/knowledge-base/deploy/company.env`，不要提交此文件。
 - 默认仅一个 API 进程和一个持久导入 worker；不要增加 `--workers` 或横向复制共享 SQLite。需要更大规模时再迁移关系数据库、任务调度和向量索引。
 - 容器中初始密码位置 `/data/security/initial-admin-password.txt`。单独备份 `/data/security/encryption.key`，不要与数据备份放在同一个公开位置。
-- `GET /ready` 检查数据库、上传目录和 worker 线程。`/api/operations` 供管理员查看任务和预算；`deploy/monitor.py` 可接现有告警平台，失败返回非零退出码。不会擅自发送邮件或通知。
-- 主机部署可安装 `deploy/knowledge-maintenance.service` 与 `.timer`（修改实际路径与用户后启用）；容器部署从宿主机定时执行 `docker compose -f deploy/compose.yaml exec -T backend python scripts/maintenance.py`。
-- 定时备份保存到本机，不等于异地灾备。将完成的归档推送到团队控制的备份存储，并设置访问控制和保留期限。
+- `GET /ready` 检查数据库、上传目录和 worker 线程。`/api/operations` 供管理员查看任务和预算。
+- 如需执行维护，在服务器 `/opt/knowledge-base` 下运行 `docker compose -p knowledge-company --env-file deploy/company-version.env -f deploy/compose.company.yaml exec -T backend python scripts/maintenance.py`。当前未自动安装定时维护任务。
+- 后续部署前自动备份到服务器 `backups/`，尚未配置每日定时备份或异地灾备。将完成的归档推送到团队控制的备份存储，并设置访问控制和保留期限。
 - 模型请求正文和回答默认保留30天；定时维护会清空更旧的正文，保留用量统计。备份可能仍包含旧正文，备份保留策略必须同步配置。
 
 ## 备份与恢复

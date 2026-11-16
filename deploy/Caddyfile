@@ -1,20 +1,20 @@
-{$SITE_ADDRESS:localhost} {
-    encode zstd gzip
+# 容器内部提供前端并代理知识库 API。
+:8080 {
     handle /api/* {
-        reverse_proxy backend:8001 {
+        reverse_proxy {$API_UPSTREAM} {
             flush_interval -1
         }
     }
-    handle /health { reverse_proxy backend:8001 }
-    handle /ready { reverse_proxy backend:8001 }
+    handle /ready {
+        reverse_proxy {$API_UPSTREAM}
+    }
+    handle /health {
+        reverse_proxy {$API_UPSTREAM}
+    }
     handle {
         root * /srv
         try_files {path} /index.html
+        header Cache-Control "no-cache"
         file_server
-    }
-    header {
-        X-Content-Type-Options nosniff
-        Referrer-Policy same-origin
-        X-Frame-Options DENY
     }
 }

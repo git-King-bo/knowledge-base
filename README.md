@@ -123,9 +123,12 @@ backend/tests/             # 隔离数据库的流程与统计回归测试
 
 默认数据库为 `backend/knowledge_base.db`。启动会增量创建缺失表，不回填历史用量、不删除旧数据。
 
-支持 MySQL 5.7+，安装后端依赖后，在 `backend/.env`（Docker 使用 `deploy/production.env`）填写
+支持 MySQL 5.7+，安装后端依赖后，在 `backend/.env` 填写
 `XINIU_MYSQL_HOST`、`XINIU_MYSQL_PORT`、`XINIU_MYSQL_DATABASE`、`XINIU_MYSQL_USER`、`XINIU_MYSQL_PASSWORD`。
 密码仅放在环境配置中，不提交代码仓库，不放在 Vercel 前端变量中。
+
+当前 companyOps Docker 部署固定使用独立 SQLite，不连接上述 MySQL。
+部署入口为 `bash deploy/deploy.sh`，无需云镜像仓库，详见 [Docker 部署说明](deploy/COMPANY-部署说明.md)。
 
 - `APP_DATABASE_MODE=auto`（默认）：启动时探测 MySQL，连接或认证失败则使用 SQLite；未配置 MySQL 时直接使用 SQLite。
 - `APP_DATABASE_MODE=mysql`：强制 MySQL，失败拒绝启动；适用于运维迁移和不允许切库的正式部署。
