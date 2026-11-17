@@ -359,7 +359,7 @@ def execute_plan(plan: TalentPlan, sheets: list[TalentSheet], *, all_records: bo
     return results
 
 
-def parse_model_plan(raw: str) -> TalentPlan:
+def parse_model_plan(raw: str, *, sheets=None, question="", previous=None) -> TalentPlan:
     """Normalize unambiguous transport wrappers, never discard competing plans."""
     def unique_keys(pairs):
         result = {}
@@ -376,6 +376,9 @@ def parse_model_plan(raw: str) -> TalentPlan:
         raise ValueError('Expected one query plan object')
     if data.get('context_update', {}) is None:
         data = {**data, 'context_update': {}}
+    if 'facets' in data:
+        from app.services.talent_semantics import compile_intent
+        return compile_intent(data, question, sheets or [], previous)
     return TalentPlan.model_validate(data)
 
 
@@ -423,6 +426,16 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
     if not sheets:
         trace_note('人才路径选择', status='skipped', reason='没有可用人才表，进入知识片段检索')
         return None
+    if getattr(planner, 'fast_search', False) and isinstance(getattr(planner, 'previous_plan', None), dict):
+        from app.services.talent_structured_router import repair_legacy_topic
+        repaired = repair_legacy_topic(planner.previous_plan, getattr(planner, 'previous_question', None), sheets, question)
+        if repaired != planner.previous_plan:
+            planner.previous_plan = repaired
+            trace_note('修复历史主题解析', reason='历史活动前缀被误识别为主题；其他条件及排序保留')
+    from app.services.talent_semantics import bind_semantics, schema_catalog
+    previous = getattr(planner, 'previous_plan', None)
+    if getattr(planner, 'fast_search', False) and isinstance(previous, dict):
+        planner.previous_plan = bind_semantics(TalentPlan.model_validate(previous), sheets).model_dump()
     from app.services.query_cache import plan_cache
     import hashlib
     namespace=getattr(planner,'cache_namespace',None)
@@ -435,8 +448,11 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
     if (not saved_plan and not cached_plan and getattr(planner,'fast_search',False)
             and not getattr(planner,'has_unstructured_history',False)):
         from app.services.talent_structured_router import compile_structured
-        local_plan=compile_structured(question,sheets)
+        from app.services.talent_semantics import local_geo_intent, compile_intent
+        geo = local_geo_intent(question, getattr(planner,'previous_plan',None))
+        local_plan=compile_intent(geo, question, sheets, getattr(planner,'previous_plan',None)) if geo is not None else compile_structured(question,sheets)
         if local_plan is not None:
+            local_plan = bind_semantics(local_plan, sheets)
             previous=getattr(planner,'previous_plan',None)
             if isinstance(previous,dict) and previous:
                 from app.services.talent_context_update import inherit_plan
@@ -460,6 +476,7 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
             from app.services.talent_fast_search import region_value
             schema['region_values'] = sorted({region_value(row['fields']) for sheet in sheets for row in sheet.rows} - {''})
             schema['fields'].append('@current_region')
+            schema['semantic_slots'] = schema_catalog(schema['fields'])
         try:
             raw = planner(schema)
         except Exception:
@@ -468,7 +485,7 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
         try:
             if raw is None:
                 raise ValueError('No planner response')
-            plan = parse_model_plan(raw)
+            plan = parse_model_plan(raw, sheets=sheets, question=question, previous=getattr(planner,'previous_plan',None))
             if getattr(planner, 'fast_search', False) and plan.search:
                 from app.services.talent_search_schema import SearchSpec, SearchPredicate, bind_relations
                 plan=bind_relations(plan, question)
@@ -510,6 +527,9 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
         if getattr(planner,'fast_search',False) is True:
             raise TalentQueryFailure(notice,failure_reason)
         return notice
+    if getattr(planner, 'fast_search', False):
+        plan = bind_semantics(plan, sheets)
+        trace_note('语义槽位编译', slots=[{'slot':p.slot,'kind':p.kind,'fields':p.fields,'values':p.values} for p in (plan.search.predicates if plan.search else [])])
     trace_note('查询意图与路径', intent=plan.intent, operation=plan.operation, field=plan.field,
                filters=[item.model_dump() for item in plan.filters], reason=plan.message)
     if plan.intent == 'semantic':

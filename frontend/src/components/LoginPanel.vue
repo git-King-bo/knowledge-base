@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useUpdateGuard } from '../lib/updateSafety'
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { request } from '../lib/api'
 import { currentUser, type User } from '../lib/auth'
@@ -26,6 +27,7 @@ const hidden = ref(false)
 function visibilityChanged() { hidden.value = document.hidden; if (document.hidden) finishEntrance() }
 
 const username = ref(''), password = ref(''), error = ref(''), busy = ref(false)
+useUpdateGuard({ label: '登录输入（不会保存为草稿）', dirty: () => !entering.value && Boolean(username.value || password.value), busy: () => busy.value })
 const showPassword = ref(false), paused = ref(false), reducedMotion = ref(false)
 const motionPaused = computed(() => paused.value || reducedMotion.value || hidden.value)
 let media: MediaQueryList | undefined
@@ -84,14 +86,14 @@ async function login() {
         <svg class="login-mark" viewBox="0 0 48 52" fill="none" aria-hidden="true"><path d="M24 2 46 26 24 50 2 26 24 2Z" stroke="currentColor" stroke-width="1.2"/><path d="m24 2 4 20 18 4-18 4-4 20-4-20L2 26l18-4 4-20Z" fill="currentColor"/><path d="M8 19 40 33M24 2v48" stroke="currentColor" stroke-width=".8"/></svg>
         <span>知序</span>
       </div>
-      <div class="motion-controls">
+      <!-- <div class="motion-controls">
       <button class="motion-toggle" type="button" :aria-pressed="motionPaused" :disabled="reducedMotion"
         :aria-label="reducedMotion ? '已跟随系统减少动态效果' : paused ? '播放背景动效' : '暂停背景动效'" @click="paused = !paused">
         <svg v-if="motionPaused" viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5Z" fill="currentColor" /></svg>
         <svg v-else viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3v10M11 3v10" stroke="currentColor" stroke-width="2" /></svg>
         <span>{{ reducedMotion ? '静态模式' : paused ? '播放动效' : '暂停动效' }}</span>
       </button>
-      </div>
+      </div> -->
     </header>
     <div class="login-layout" :inert="entering || undefined">
       <div class="login-art-space"><FairyAwakening ref="fairyScene" :casting="entering" /></div>
@@ -131,7 +133,7 @@ async function login() {
       </section>
     </div>
     <footer class="login-footer" :inert="entering || undefined"><span>A LITTLE KNOWLEDGE MAGIC</span><i aria-hidden="true"></i><span>知识有序，灵感无界。</span></footer>
-    <button v-if="entering" class="login-skip" type="button" @click="finishEntrance">跳过动画 <kbd>Esc</kbd></button>
+    <!-- <button v-if="entering" class="login-skip" type="button" @click="finishEntrance">跳过动画 <kbd>Esc</kbd></button> -->
   </main>
 </template>
 

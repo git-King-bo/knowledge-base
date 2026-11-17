@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useFormUpdateGuard } from '../lib/updateSafety'
 import { computed, reactive, ref, onBeforeUnmount } from 'vue'
 import { submitImport, request, createKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase, fetchKnowledgeBaseSources, fetchKnowledgeBaseChunks, removeKnowledgeBaseSource } from '../lib/api'
 import { currentUser } from '../lib/auth'
@@ -32,6 +33,7 @@ const formVisible = computed({
 const removingSource = ref<KnowledgeSource>()
 const previewingSource = ref<KnowledgeSource>()
 const form = reactive({ name: '', description: '', tags: '' })
+useFormUpdateGuard('知识库表单', () => formVisible.value, () => form)
 const notice = ref('')
 const uploadProgress = ref('')
 const chunkOffset = ref(0)

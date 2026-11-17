@@ -1,5 +1,10 @@
 # 容器内部提供前端并代理知识库 API。
 :8080 {
+    handle /version.json {
+        root * /srv
+        header Cache-Control "no-store"
+        file_server
+    }
     handle /api/* {
         reverse_proxy {$API_UPSTREAM} {
             flush_interval -1

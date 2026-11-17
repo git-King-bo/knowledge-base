@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useFormUpdateGuard } from '../lib/updateSafety'
 import { reactive, ref } from 'vue'
 import { createProvider, updateProvider, switchProvider, testProvider, chatWithProvider } from '../lib/api'
 import type { ProviderConfig } from '../lib/types'
@@ -21,6 +22,7 @@ const thinkingOptions = [{ value: 'default', label: '默认' }, { value: 'on', l
 const thinkingValue = (value?: boolean | null) => value == null ? 'default' : value ? 'on' : 'off'
 const thinkingFlag = (value: string) => value === 'default' ? null : value === 'on'
 const form = reactive({ thinkingMode: 'default', name: '', baseUrl: '', apiKey: '', defaultModel: '' })
+useFormUpdateGuard('模型配置（密钥不会保存为草稿）', () => dialog.value, () => form)
 const testResults = ref<Record<string, { ok: boolean; message: string }>>({})
 const chatProvider = ref<ProviderConfig>()
 const prompt = ref('请用一句话介绍你自己。')

@@ -24,7 +24,11 @@ def region_value(fields):
 
 def test_predicate(fields, predicate):
     bound_fields=predicate_fields(predicate)
-    values=[region_value(fields) if f=='@current_region' else str(fields.get(f,'')).strip() for f in bound_fields]
+    from app.services.talent_semantics import institution_type
+    values=[region_value(fields) if f=='@current_region' else (institution_type(fields) or '') if f=='@institution_type' else str(fields.get(f,'')).strip() for f in bound_fields]
+    if predicate.slot in ('current_region','institution_country'):
+        from app.services.talent_semantics import country
+        values=[country(v) or v for v in values]
     values=[v for v in values if v and v.strip().casefold() not in {'—','-','n/a','unknown','未知','不详','未提供'}]
     if not values:
         return None
@@ -55,7 +59,7 @@ def validate_compiled(plan, sheets):
         if predicate.kind!='unresolved':
             if not predicate.values or any(not v.strip() for v in predicate.values):
                 raise ValueError('Empty search predicate')
-            if not predicate_fields(predicate) or any(f not in headers|{'@current_region'} for f in predicate_fields(predicate)):
+            if not predicate_fields(predicate) or any(f not in headers|{'@current_region','@institution_type'} for f in predicate_fields(predicate)):
                 raise ValueError('Unknown search predicate field')
             if predicate.op in {'gte','lte'} and (len(predicate.values)!=1 or number_value(predicate.values[0]) is None):
                 raise ValueError('Invalid numeric search predicate')
@@ -98,7 +102,7 @@ def search_talents(question, plan, sheets, failures, planner, scope, offset, pag
     embedding_query=' '.join(dict.fromkeys(v for p in topics for v in p.values))
     dense={}; vector_status='not_needed'; covered=0
     index=None
-    if topics and entries:
+    if topics and entries and not unresolved:
         index,vector_status=ready_index(getattr(planner,'search_db',None),sheets,scope)
     def lexical():
         texts=[normalized(text) for text in documents]
@@ -111,7 +115,7 @@ def search_talents(question, plan, sheets, failures, planner, scope, offset, pag
                 if not any(normalized(v) in text for v in predicate.values+predicate.related_values):scores[i]=0
         return ([sum(scores[i] for scores in per_topic) for i in range(len(entries))],
                 [all(s[i] for s in supports) for i in range(len(entries))])
-    if topics and entries:
+    if topics and entries and not unresolved:
         with trace_stage('并行文本与向量召回'):
             with ThreadPoolExecutor(max_workers=1,thread_name_prefix='talent-bm25') as pool:
                 future=pool.submit(lexical)
@@ -151,7 +155,7 @@ def search_talents(question, plan, sheets, failures, planner, scope, offset, pag
     selected=(sorted((i for i in fused if supported[i]),key=lambda i:fused[i],reverse=True)[:limit]
               if topics else ([] if unresolved and not metadata else list(range(len(entries)))))
     rerank_status='not_needed'
-    if topics:
+    if topics and not unresolved:
         from app.services.talent_rerank import rerank
         with trace_stage('候选相关性重排'):
             reordered,rerank_status=rerank(topic_query,[documents[i] for i in selected],
@@ -163,6 +167,8 @@ def search_talents(question, plan, sheets, failures, planner, scope, offset, pag
             value=number_value(entries[i][1]['fields'].get(plan.sort_by,''))
             return value is None,(-value if plan.descending else value) if value is not None else recency_key(entries[i][1]['fields'])
         selected.sort(key=metric)
+    if unresolved:
+        selected=[]  # Unknown hard requirements are not zero matches or certified candidates.
     if plan.result_limit is not None:selected=selected[:plan.result_limit]
     for group in groups:
         group['records']=[];group['matched_records']=0

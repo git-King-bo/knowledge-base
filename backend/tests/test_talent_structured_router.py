@@ -120,3 +120,55 @@ class StructuredApiTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(seen,[('fixture','fixed-planner',True,settings.structured_model_max_output_tokens)])
         self.assertEqual(response.json()['model'],'alternate-model')
+
+class ActivityTopicRegressionTests(unittest.TestCase):
+    def sheet(self):
+        return TalentSheet('s','f','t',['姓名','领域','当前机构','所在国家／城市','OpenAlex h-index'],[
+            {'row':2,'talent_id':'a','fields':{'姓名':'A','领域':'AI4S','当前机构':'Example Lab','所在国家／城市':'美国','OpenAlex h-index':'10'}},
+            {'row':3,'talent_id':'b','fields':{'姓名':'B','领域':'ai4s','当前机构':'Other Lab','所在国家／城市':'中国','OpenAlex h-index':'99'}},
+            {'row':4,'talent_id':'c','fields':{'姓名':'C','领域':'other','当前机构':'Other Lab','所在国家／城市':'英国','OpenAlex h-index':'20'}}])
+
+    def test_activity_and_research_wrappers_do_not_become_topic_terms(self):
+        for topic in ['AI4S','ai4s','蛋白质设计','arbitrary-Zeta']:
+            for question in [f'从事{topic}领域的人才',f'从事{topic}领域研究的人才',f'查找从事{topic}方向研究的人才']:
+                with self.subTest(question=question):
+                    plan=compile_structured(question,[self.sheet()])
+                    self.assertEqual(plan.search.predicates[0].values,[topic])
+        for question in ['从事AI4S和机器人领域的人才','从事AI4S领域但排除美国的人才','从事AI4S领域并且有创业经历的人才','从事AI4S领域并且机器人领域人才']:
+            self.assertIsNone(compile_structured(question,[self.sheet()]),question)
+
+    def test_legacy_repair_retains_geography_sorting_and_does_not_mutate_input(self):
+        from copy import deepcopy
+        from app.services.talent_search_schema import SearchPredicate
+        from app.services.talent_structured_router import repair_legacy_topic
+        plan=compile_structured('帮我查找海外人才',[self.sheet()])
+        bad=SearchPredicate(condition='从事ai4s领域相关',kind='topic',fields=['领域'],values=['从事ai4s'])
+        plan.search.predicates.append(bad);plan.evidence_conditions.append(bad.condition)
+        plan.topic_condition=bad.condition;plan.sort_by='OpenAlex h-index'
+        previous=plan.model_dump();before=deepcopy(previous)
+        repaired=repair_legacy_topic(previous,'从事ai4s领域的人才',[self.sheet()])
+        self.assertEqual(previous,before)
+        self.assertEqual(repaired['sort_by'],'OpenAlex h-index')
+        self.assertEqual(repaired['search']['predicates'][0],previous['search']['predicates'][0])
+        self.assertEqual(repaired['search']['predicates'][1]['values'],['ai4s'])
+        self.assertEqual(repair_legacy_topic(previous,'换成机器人领域人才',[self.sheet()]),previous)
+
+    def test_repaired_context_search_returns_overseas_topic_match_without_models(self):
+        import json
+        from types import SimpleNamespace
+        from app.services.talent_search import talent_context
+        from app.services.talent_search_schema import SearchPredicate
+        sheets=[self.sheet()]
+        previous=compile_structured('帮我查找海外人才',sheets)
+        bad=SearchPredicate(condition='从事ai4s领域相关',kind='topic',fields=['领域'],values=['从事ai4s'])
+        previous.search.predicates.append(bad);previous.evidence_conditions.append(bad.condition)
+        previous.topic_condition=bad.condition;previous.sort_by='OpenAlex h-index'
+        def planner(schema):raise AssertionError('No model needed for a literal topic refinement')
+        planner.fast_search=True;planner.previous_plan=previous.model_dump();planner.previous_question='从事ai4s领域的人才'
+        planner.has_unstructured_history=False;planner.search_db=None;planner.search_base='base'
+        with patch('app.services.talent_search.read_talent_sheets',return_value=(sheets,[])),patch('app.services.talent_fast_search.ready_index',return_value=(None,'warming')):
+            result=json.loads(talent_context('从事AI4S领域研究的人才',[SimpleNamespace()],planner,max_results=5,snapshot_scope=('activity-topic-regression',)))
+        rows=[r for group in result['results'] for r in group.get('records',[])]
+        self.assertEqual([r['fields']['姓名'] for r in rows],['A'])
+        self.assertEqual(result['plan']['sort_by'],'OpenAlex h-index')
+        self.assertEqual(len(result['plan']['evidence_conditions']),2)

@@ -39,7 +39,19 @@ pnpm install
 pnpm dev
 ```
 
-默认地址为 `http://127.0.0.1:5174`；端口被占用时 Vite 会选择下一个可用端口。可用 `VITE_PORT`、`VITE_HOST` 调整；`VITE_API_BASE_URL` 默认为 `/api`；开发环境由 Vite 代理到8001端口，生产环境由 Caddy 反向代理。
+默认地址为 `http://127.0.0.1:5177`；端口被占用时 Vite 会选择下一个可用端口。可用 `VITE_PORT`、`VITE_HOST` 调整；`VITE_API_BASE_URL` 默认为 `/api`；开发环境由 Vite 代理到8001端口，生产环境由 Caddy 反向代理。
+
+### 本地前端连接线上完整环境
+
+```bash
+cd frontend
+pnpm dev:online
+```
+
+只运行本地前端，不需要启动本地后端。`/api`、`/health`、`/ready` 通过 Vite 代理到 `http://future.ops.originhub.tech`，使用线上账号、数据库、模型及已重建索引。
+访问终端显示的本地地址（默认 `http://127.0.0.1:5177`）。该模式仅监听本机，前端修改仍支持热更新。
+新增、编辑、删除和模型调用均作用于线上环境；不是隔离测试库。Cookie 由本地代理转发，生产鉴权和权限检查仍然执行，不需要把模型密钥放进前端。
+`pnpm dev` 仍连接本地后端8001端口；生产构建和线上容器配置不受此开发模式影响。
 
 ## 模型、检索与导入
 

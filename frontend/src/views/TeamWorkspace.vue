@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useUpdateGuard } from '../lib/updateSafety'
 import {ref,onMounted} from 'vue'
 import {request} from '../lib/api'
 import {currentUser,logout,type User} from '../lib/auth'
@@ -10,7 +11,9 @@ const users=ref<User[]>([]),username=ref(''),password=ref(''),role=ref('viewer')
 const orphans=ref<{id:string;filename:string}[]>([])
 const operations=ref<Record<string,unknown>>({})
 const trash=ref<{id:string;name:string;deleted_at:string}[]>([]),events=ref<{id:string;action:string;target:string;created_at:string}[]>([])
-async function run(fn:()=>Promise<unknown>){error.value='';notice.value='';try{await fn();notice.value='操作已完成'}catch(e){error.value=String(e)}}
+const pending = ref(0)
+useUpdateGuard({ label: '账号与权限表单（密码不会保存为草稿）', dirty: () => Boolean(username.value || password.value || oldPassword.value || newPassword.value || base.value || selectedUser.value), busy: () => pending.value > 0 })
+async function run(fn:()=>Promise<unknown>){pending.value++;error.value='';notice.value='';try{await fn();notice.value='操作已完成'}catch(e){error.value=String(e)}finally{pending.value--}}
 async function load(){if(currentUser.value?.role==='admin'){users.value=await request('/auth/users');trash.value=await request('/trash');events.value=await request('/audit');operations.value=await request('/operations');orphans.value=await request('/orphan-sources')}}
 async function create(){await request('/auth/users',{method:'POST',body:JSON.stringify({username:username.value,password:password.value,role:role.value})});password.value='';await load()}
 async function grant(){await request(`/auth/access/${base.value}/${selectedUser.value}?role=${access.value}`,{method:'PUT'})}

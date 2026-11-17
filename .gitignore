@@ -52,3 +52,6 @@ deploy/company.env
 deploy/company-version.env
 deploy/.credentials/
 releases/
+
+# Private model runtime configuration
+**/models.env

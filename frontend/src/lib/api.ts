@@ -591,12 +591,16 @@ export async function streamKnowledge(
 
 
 export async function submitImport(baseId: string, file: File, confirmPreview?: (preview: {talent_records:number;fields:string[];characters:number;duplicate_name_rows:number}) => boolean) {
-  const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()))]
-    .map(value => value.toString(16).padStart(2, '0')).join('')
-  const reused = await request<{reused:boolean;source_id?:string}>(`/imports/${baseId}/reuse`, {
-    method: 'POST', body: JSON.stringify({sha256:hash}),
-  })
-  if (reused.reused) return reused
+  // Public HTTP origins do not expose SubtleCrypto. The upload endpoint still
+  // computes SHA-256 server-side and performs the same deduplication checks.
+  if (globalThis.crypto?.subtle) {
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()))]
+      .map(value => value.toString(16).padStart(2, '0')).join('')
+    const reused = await request<{reused:boolean;source_id?:string}>(`/imports/${baseId}/reuse`, {
+      method: 'POST', body: JSON.stringify({sha256:hash}),
+    })
+    if (reused.reused) return reused
+  }
   const data = new FormData(); data.append('file', file)
   if (confirmPreview) {
     const preview = await request<{talent_records:number;fields:string[];characters:number;duplicate_name_rows:number}>(`/imports/${baseId}/preview`, {method:'POST',body:data})

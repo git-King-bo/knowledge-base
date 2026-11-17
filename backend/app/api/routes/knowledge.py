@@ -340,10 +340,18 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
                 from app.services.talent_search_schema import fast_query_instructions
                 instructions = fast_query_instructions()
         request_data={"question":schema.get('question',question),"schema":schema}
+        compact = fast and not schema.get('phase')
+        if compact:
+            request_data['schema']={'available_slots':{k:bool(v) for k,v in schema.get('semantic_slots',{}).items()},
+                                    'metrics':schema.get('semantic_slots',{}).get('metric',[])}
         if request_context and schema.get('phase') not in {'verify_candidates','review_context_update'}:
-            request_data['request_context']=request_context
+            request_data['request_context']=dict(request_context)
+            if compact and request_context.get('previous_plan'):
+                from app.services.talent_semantics import previous_intent
+                from app.services.talent_search import TalentPlan
+                request_data['request_context']['previous_plan']=previous_intent(TalentPlan.model_validate(request_context['previous_plan']))
         messages = [ChatMessage(role="system", content=instructions),
-                    ChatMessage(role="user", content=json.dumps(request_data, ensure_ascii=False))]
+                    ChatMessage(role="user", content=json.dumps(request_data, ensure_ascii=False, separators=(',',':')))]
         started = perf_counter()
         result = None
         failure = ''
@@ -372,6 +380,7 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
                 latency_ms=int((perf_counter() - started) * 1000))
 
     plan_talent_query.previous_plan=(request_context or {}).get('previous_plan')
+    plan_talent_query.previous_question=(request_context or {}).get('previous_question')
     plan_talent_query.has_unstructured_history=bool((request_context or {}).get('previous_questions'))
     plan_talent_query.review_context=plan_talent_query
     plan_talent_query.original_question=(request_context or {}).get('original_question',question)

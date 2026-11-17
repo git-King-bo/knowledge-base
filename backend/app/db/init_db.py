@@ -61,7 +61,23 @@ def seed_db(db: Session) -> None:
             default_model=settings.default_api_model, is_default=not has_default,
         ))
         has_default = True
+    if settings.sync_env_provider:
+        from app.core.security import validate_provider_url, encrypt_secret
+        if not settings.default_api_url or not settings.default_api_key:
+            raise RuntimeError('Managed model configuration requires model URL and API key')
+        validate_provider_url(settings.default_api_url)
+        db.flush()
+        managed = db.get(AIProviderModel, 'provider-agent-default')
+        managed.base_url = settings.default_api_url
+        managed.default_model = settings.default_api_model
+        managed.provider = 'openai-compatible'
+        managed.name = '配置文件模型'
+        managed.api_key_encrypted = encrypt_secret(settings.default_api_key)
+        managed.api_key_hint = '已填写'
+        for provider in db.scalars(select(AIProviderModel)):
+            provider.is_default = provider.id == managed.id
     if not db.get(AIProviderModel, 'provider-mock'):
+
         db.add(AIProviderModel(
             id='provider-mock', name='Mock Provider', provider='mock', base_url='local://mock',
             api_key_hint='无需密钥', default_model='mock-chat', is_default=not has_default,
@@ -74,4 +90,8 @@ def seed_db(db: Session) -> None:
             db.add(AIModelModel(id=model_id, provider_id=provider_id, name=provider.default_model,
                                context_window=32000, supports_tools=False, supports_vision=False,
                                status='ready'))
+    if settings.sync_env_provider:
+        model = db.get(AIModelModel, 'model-agent-default')
+        if model:
+            model.name = settings.default_api_model
     db.commit()

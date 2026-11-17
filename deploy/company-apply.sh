@@ -74,6 +74,22 @@ rollback() {
     nginx -t && systemctl reload nginx
 }
 trap rollback ERR
+if [[ "$target" != backend ]]; then
+    # Keep content-hashed assets from old pages, including the pre-upgrade deployment.
+    assets="$root/data/frontend-assets"
+    mkdir -p "$assets"
+    chmod 755 "$assets"
+    if docker inspect knowledge-company-web-1 >/dev/null 2>&1; then
+        docker cp knowledge-company-web-1:/srv/assets/. "$assets"
+    fi
+    asset_container="knowledge-assets-$version"
+    docker create --name "$asset_container" "knowledge-company-frontend:$frontend_version" >/dev/null
+    if ! docker cp "$asset_container:/srv/assets/." "$assets"; then
+        docker rm "$asset_container" >/dev/null
+        false
+    fi
+    docker rm "$asset_container" >/dev/null
+fi
 install -m 644 "$incoming/compose.company.yaml" "$root/deploy/compose.company.yaml"
 if [ ! -f "$root/deploy/company.env" ]; then
     install -m 600 "$incoming/company.env.example" "$root/deploy/company.env"

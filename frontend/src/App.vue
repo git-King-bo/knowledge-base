@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { fetchKnowledgeBases, fetchProviders } from './lib/api'
 import type { KnowledgeBase, ProviderConfig } from './lib/types'
+import UpdateNotice from './components/UpdateNotice.vue'
 import AppIcon from './components/AppIcon.vue'
 import FairyIcon from './components/FairyIcon.vue'
 import MagicEntrance from './components/MagicEntrance.vue'
@@ -69,6 +70,7 @@ watch(currentUser, user => { if (user) void load(); else { bases.value=[]; provi
 onUnmounted(() => window.removeEventListener('hashchange', readHash))
 </script>
 <template>
+  <UpdateNotice />
   <p v-if="!sessionReady" class="notice">正在检查登录状态…</p>
   <LoginPanel v-if="sessionReady && (!currentUser || loginTransition)" @entering="beginLoginEntrance" @entered="loginTransition = false" />
   <template v-if="sessionReady && currentUser">

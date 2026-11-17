@@ -1,17 +1,20 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=(".env", "models.env"), env_file_encoding="utf-8")
 
     auth_enabled: bool = Field(default=True, alias="APP_AUTH_ENABLED")
     encryption_key: str = Field(default="", alias="APP_ENCRYPTION_KEY")
     security_dir: str = Field(default="storage/security", alias="APP_SECURITY_DIR")
     provider_allowed_hosts: str = Field(default="", alias="APP_PROVIDER_ALLOWED_HOSTS")
+    provider_http_origins: str = Field(default="", alias="APP_PROVIDER_HTTP_ORIGINS")
+    sync_env_provider: bool = Field(default=False, alias="APP_SYNC_ENV_PROVIDER")
+    embedding_dimensions: int | None = Field(default=None, ge=1, le=65536, alias="AGENT_EMBEDDING_DIMENSION")
     allow_private_providers: bool = Field(default=False, alias="APP_ALLOW_PRIVATE_PROVIDERS")
     session_hours: int = Field(default=12, ge=1, le=168, alias="APP_SESSION_HOURS")
     worker_enabled: bool = Field(default=True, alias="APP_WORKER_ENABLED")
@@ -84,6 +87,16 @@ class Settings(BaseSettings):
     web_search_max_results: int = Field(default=5, alias="WEB_SEARCH_MAX_RESULTS")
     web_search_timeout_seconds: float = Field(default=10.0, alias="WEB_SEARCH_TIMEOUT_SECONDS")
     web_search_auto_threshold: float = Field(default=0.35, alias="WEB_SEARCH_AUTO_THRESHOLD")
+
+    @field_validator('default_api_url', 'embedding_api_url', mode='before')
+    @classmethod
+    def normalize_model_url(cls, value):
+        if isinstance(value, str):
+            value = value.strip().rstrip('/')
+            for suffix in ('/chat/completions', '/embeddings'):
+                if value.endswith(suffix):
+                    return value[:-len(suffix)]
+        return value
 
     @property
     def cors_origins(self) -> list[str]:

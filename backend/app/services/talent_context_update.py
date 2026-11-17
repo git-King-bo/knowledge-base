@@ -43,7 +43,8 @@ def inherit_plan(current, previous, question, *, reviewer=None):
     if any(i<0 or i>=len(previous.filters) for i in change.remove_filters):
         raise ValueError('旧字段条件下标不存在')
     resolved=_compile_change(current,previous,question,bool(changed))
-    if changed:
+    from app.services.talent_semantics import deterministic_region_change
+    if changed and not deterministic_region_change(current, previous, question):
         if not callable(reviewer):
             raise ContextChangeUnresolved('本次条件变更未完成语义核对，请稍后重试。')
         try:

@@ -37,13 +37,13 @@ build() {
             docker build --platform linux/amd64 -f "$work/Dockerfile" -t "$image" . || return
         elif [[ "$role" == frontend ]] && command -v pnpm >/dev/null &&
              [[ "$(docker image inspect --format '{{.Architecture}}' knowledge-base-release-test:frontend 2>/dev/null || true)" == amd64 ]]; then
-            pnpm --dir frontend build || return
+            VITE_APP_VERSION="$version" pnpm --dir frontend build || return
             cp -R frontend/dist "$work/dist" || return
             cp deploy/Caddyfile "$work/Caddyfile" || return
             printf 'FROM knowledge-base-release-test:frontend\nCOPY dist /srv\nCOPY Caddyfile /etc/caddy/Caddyfile\n' > "$work/Dockerfile"
             docker build --platform linux/amd64 -t "$image" "$work" || return
         else
-            docker build --platform linux/amd64 -f "deploy/Dockerfile.$role" -t "$image" . || return
+            docker build --platform linux/amd64 --build-arg "VITE_APP_VERSION=$version" -f "deploy/Dockerfile.$role" -t "$image" . || return
         fi
         [[ "$(docker image inspect --format '{{.Architecture}}' "$image")" == amd64 ]] || return 1
     done

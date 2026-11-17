@@ -17,3 +17,5 @@ data
 releases
 deploy/.credentials
 backend/tests
+
+**/models.env

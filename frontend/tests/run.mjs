@@ -9,7 +9,7 @@ let failed = false
 for (const file of files) {
   const name = file.replace('.ts', '.mjs')
   const output = path(`../node_modules/.cache/all-tests/${file}/`)
-  await build({ configFile: false, plugins: [vue()], logLevel: 'warn',
+  await build({ configFile: false, define: file === 'release-update.test.ts' ? { __APP_VERSION__: JSON.stringify('release-old') } : {}, plugins: [vue()], logLevel: 'warn',
     resolve: { alias: { 'html-to-image': path('./dialog-image-mock.ts') } },
     build: { lib: { entry: path('./' + file), formats: ['es'], fileName: () => name },
       outDir: output, emptyOutDir: true, minify: false,

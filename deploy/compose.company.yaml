@@ -1,7 +1,10 @@
 services:
   backend:
     image: knowledge-company-backend:${KB_BACKEND_VERSION:-${KB_VERSION:?KB_VERSION required}}
-    env_file: company.env
+    env_file:
+      - company.env
+      - path: models.env
+        required: false
     environment:
       APP_ENV: production
       APP_AUTH_ENABLED: "true"
@@ -30,6 +33,8 @@ services:
       API_UPSTREAM: backend:8001
     ports:
       - "127.0.0.1:18080:8080"
+    volumes:
+      - ../data/frontend-assets:/srv/assets:ro
     depends_on:
       backend: {condition: service_healthy}
     restart: unless-stopped

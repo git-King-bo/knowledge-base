@@ -125,6 +125,10 @@ class EmbeddingClient:
             embeddings.append([float(value) for value in vector])
         if len(embeddings) != len(texts):
             raise RuntimeError("Embedding response length mismatch")
+        if (settings.embedding_dimensions and self.config.model == settings.embedding_model
+                and self.config.api_url == settings.embedding_api_url
+                and any(len(vector) != settings.embedding_dimensions for vector in embeddings)):
+            raise RuntimeError('Embedding dimensions do not match configured model')
         return embeddings, TokenUsage.from_response(data, embedding=True)
 
     def embed_text(self, text: str) -> list[float]:

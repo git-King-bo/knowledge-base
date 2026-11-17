@@ -117,6 +117,8 @@ def render_search_answer(evidence, rows):
     total=evidence['matched']; page=evidence['pagination']; plan=evidence['plan']
     parts=[f"本次检索返回 {total} 条{'待核验候选' if unresolved else '相关人才记录'}。" if total else
            '本次未召回符合当前筛选范围的相关记录，不代表资料中不存在相关人才。']
+    if unresolved:
+        parts=['本次条件缺少可核验的数据或执行方式，尚未执行完整筛选；这不是没有匹配人才。']
     conditions=list(dict.fromkeys(plan.get('evidence_conditions',[])))
     if conditions:
         parts.append('当前筛选条件：'+'；'.join(cell(c) for c in conditions)+'。')

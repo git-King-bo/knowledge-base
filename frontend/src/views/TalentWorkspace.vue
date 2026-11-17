@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useFormUpdateGuard, useUpdateGuard } from '../lib/updateSafety'
 import { computed, ref, onMounted } from 'vue'
 import { request, apiFetch } from '../lib/api'
 import { currentUser } from '../lib/auth'
@@ -18,6 +19,8 @@ const error = ref(''), notice = ref(''), busy = ref(false), saving = ref(false),
 const detail = ref<Detail>(), history = ref<{ created_at: string; fields: Record<string, string> }[]>([])
 const duplicates = ref<{ name: string; count: number }[]>([])
 const editing = ref(false)
+useFormUpdateGuard('人才资料编辑', () => editing.value && !!detail.value, () => detail.value?.fields)
+useUpdateGuard({ label: '人才保存', dirty: () => false, busy: () => saving.value })
 const canEdit = computed(() => currentUser.value?.role === 'admin' || currentUser.value?.role === 'editor')
 const baseOptions = computed(() => [
   { value: '', label: '全部可访问知识库', description: `在 ${props.bases.length} 个可访问知识库中查找` },

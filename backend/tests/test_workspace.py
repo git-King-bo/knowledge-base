@@ -44,7 +44,14 @@ class WorkspaceTests(unittest.TestCase):
         app.dependency_overrides[get_db] = database
         # Startup is intentionally omitted: all tests use the isolated database above.
         self.client = TestClient(app)
-        self.patches = [patch.object(settings, 'worker_enabled', False), patch.object(settings, 'auth_enabled', False), patch.object(settings, 'security_dir', self.temp.name+'/security'), patch.object(settings, 'upload_dir', self.temp.name),
+        # Isolate tests from developer models.env routing and dimension settings.
+        self.patches = [patch.object(settings, 'provider_allowed_hosts', ''),
+                        patch.object(settings, 'provider_http_origins', ''),
+                        patch.object(settings, 'sync_env_provider', False),
+                        patch.object(settings, 'embedding_dimensions', None),
+                        patch.object(settings, 'talent_planner_provider_id', ''),
+                        patch.object(settings, 'talent_planner_model', ''),
+                        patch.object(settings, 'worker_enabled', False), patch.object(settings, 'auth_enabled', False), patch.object(settings, 'security_dir', self.temp.name+'/security'), patch.object(settings, 'upload_dir', self.temp.name),
                         patch.object(settings, 'embedding_api_url', ''),
                         patch.object(settings, 'web_search_enabled', False)]
         for item in self.patches:

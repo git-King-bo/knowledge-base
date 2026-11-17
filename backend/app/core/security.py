@@ -104,6 +104,18 @@ def validate_provider_url(value, *, resolve=False):
         raise HTTPException(503, '生产环境必须配置模型服务域名白名单')
     if allowed and host not in allowed:
         raise HTTPException(400, '模型域名不在允许列表中')
+    # Explicit deployment exceptions bind scheme, host and port, never a wildcard.
+    def origin(parsed):
+        return (parsed.scheme, parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80))
+    approved_http = False
+    for item in settings.provider_http_origins.split(','):
+        if not item.strip():
+            continue
+        configured = urlsplit(item.strip())
+        if (configured.scheme == 'http' and configured.hostname and not configured.username
+                and not configured.password and configured.path in ('', '/') and not configured.query
+                and not configured.fragment and origin(configured) == origin(url)):
+            approved_http = True
     try:
         addresses = [ipaddress.ip_address(host)]
     except ValueError:
@@ -113,9 +125,9 @@ def validate_provider_url(value, *, resolve=False):
                 addresses = [ipaddress.ip_address(x[4][0]) for x in socket.getaddrinfo(host, url.port or 443)]
             except OSError:
                 raise HTTPException(502, '无法解析模型服务域名')
-    if not settings.allow_private_providers and (host == 'localhost' or any(not x.is_global for x in addresses)):
+    if not settings.allow_private_providers and not approved_http and (host == 'localhost' or any(not x.is_global for x in addresses)):
         raise HTTPException(400, '不允许连接本机、内网或保留地址')
-    if settings.app_env == 'production' and url.scheme != 'https':
+    if settings.app_env == 'production' and url.scheme != 'https' and not approved_http:
         raise HTTPException(400, '生产模型服务必须使用 HTTPS')
     return value
 

@@ -1,0 +1,1316 @@
+{
+  "at": "2026-11-16T07:10:29.833252+00:00",
+  "base_id": "cc9b6b28-84fb-4f6d-a318-0b420c748b01",
+  "people": 906,
+  "scope": "server HTTP end-to-end; excludes user network and browser rendering; sequential sample, not production P95",
+  "results": [
+    {
+      "case": "结构化机构",
+      "iteration": 1,
+      "question": "查找清华大学人才",
+      "http_status": 200,
+      "first_text_ms": 278,
+      "complete_ms": 278,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "9106ad02-b443-4335-b5f9-9ebe7a2f97c3",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 261,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 237,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 182,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 35,
+        "unresolved_conditions": [],
+        "metadata_unknown": 1,
+        "mode": "BM25",
+        "vector_status": "not_needed",
+        "dense_covered_people": 0,
+        "eligible_people": 35,
+        "lexical_candidates": 0,
+        "dense_candidates": 0,
+        "candidate_limit": 60,
+        "rerank": "not_needed",
+        "admission": "structured_fields",
+        "direct_candidates": 0,
+        "unsupported_candidates": 0
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "当前机构属于清华大学"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "当前机构属于清华大学",
+              "kind": "metadata",
+              "fields": [
+                "当前机构"
+              ],
+              "op": "contains_any",
+              "values": [
+                "清华大学"
+              ],
+              "related_values": [],
+              "relation": "current_affiliation",
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "any"
+        }
+      }
+    },
+    {
+      "case": "结构化机构",
+      "iteration": 2,
+      "question": "查找清华大学人才",
+      "http_status": 200,
+      "first_text_ms": 90,
+      "complete_ms": 91,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "20190c7d-9be5-40d7-849d-4c2ec77d1679",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 75,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 50,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 20,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 35,
+        "unresolved_conditions": [],
+        "metadata_unknown": 1,
+        "mode": "BM25",
+        "vector_status": "not_needed",
+        "dense_covered_people": 0,
+        "eligible_people": 35,
+        "lexical_candidates": 0,
+        "dense_candidates": 0,
+        "candidate_limit": 60,
+        "rerank": "not_needed",
+        "admission": "structured_fields",
+        "direct_candidates": 0,
+        "unsupported_candidates": 0
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "当前机构属于清华大学"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "当前机构属于清华大学",
+              "kind": "metadata",
+              "fields": [
+                "当前机构"
+              ],
+              "op": "contains_any",
+              "values": [
+                "清华大学"
+              ],
+              "related_values": [],
+              "relation": "current_affiliation",
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "any"
+        }
+      }
+    },
+    {
+      "case": "结构化机构",
+      "iteration": 3,
+      "question": "查找清华大学人才",
+      "http_status": 200,
+      "first_text_ms": 88,
+      "complete_ms": 90,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "bfa1c679-51fb-4116-a03f-e643a6fd870b",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 72,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 50,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 20,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 35,
+        "unresolved_conditions": [],
+        "metadata_unknown": 1,
+        "mode": "BM25",
+        "vector_status": "not_needed",
+        "dense_covered_people": 0,
+        "eligible_people": 35,
+        "lexical_candidates": 0,
+        "dense_candidates": 0,
+        "candidate_limit": 60,
+        "rerank": "not_needed",
+        "admission": "structured_fields",
+        "direct_candidates": 0,
+        "unsupported_candidates": 0
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "当前机构属于清华大学"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "当前机构属于清华大学",
+              "kind": "metadata",
+              "fields": [
+                "当前机构"
+              ],
+              "op": "contains_any",
+              "values": [
+                "清华大学"
+              ],
+              "related_values": [],
+              "relation": "current_affiliation",
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "any"
+        }
+      }
+    },
+    {
+      "case": "结构化指标排序",
+      "iteration": 1,
+      "question": "按OpenAlex h-index从高到低排序",
+      "http_status": 200,
+      "first_text_ms": 191,
+      "complete_ms": 192,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "9d4ec1d6-26e3-4066-820a-08b3021d6ff7",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 174,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 153,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 19,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 906,
+        "unresolved_conditions": [],
+        "metadata_unknown": 0,
+        "mode": "BM25",
+        "vector_status": "not_needed",
+        "dense_covered_people": 0,
+        "eligible_people": 906,
+        "lexical_candidates": 0,
+        "dense_candidates": 0,
+        "candidate_limit": 60,
+        "rerank": "not_needed",
+        "admission": "structured_fields",
+        "direct_candidates": 0,
+        "unsupported_candidates": 0
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": "OpenAlex h-index",
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [],
+        "search": null
+      }
+    },
+    {
+      "case": "结构化指标排序",
+      "iteration": 2,
+      "question": "按OpenAlex h-index从高到低排序",
+      "http_status": 200,
+      "first_text_ms": 186,
+      "complete_ms": 188,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "782ffd2b-966c-4880-9c7c-cb7c561be735",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 171,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 150,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 21,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 906,
+        "unresolved_conditions": [],
+        "metadata_unknown": 0,
+        "mode": "BM25",
+        "vector_status": "not_needed",
+        "dense_covered_people": 0,
+        "eligible_people": 906,
+        "lexical_candidates": 0,
+        "dense_candidates": 0,
+        "candidate_limit": 60,
+        "rerank": "not_needed",
+        "admission": "structured_fields",
+        "direct_candidates": 0,
+        "unsupported_candidates": 0
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": "OpenAlex h-index",
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [],
+        "search": null
+      }
+    },
+    {
+      "case": "结构化指标排序",
+      "iteration": 3,
+      "question": "按OpenAlex h-index从高到低排序",
+      "http_status": 200,
+      "first_text_ms": 214,
+      "complete_ms": 214,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "06c346ec-8284-4646-8542-a95ec0f68953",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 192,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 169,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 22,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 906,
+        "unresolved_conditions": [],
+        "metadata_unknown": 0,
+        "mode": "BM25",
+        "vector_status": "not_needed",
+        "dense_covered_people": 0,
+        "eligible_people": 906,
+        "lexical_candidates": 0,
+        "dense_candidates": 0,
+        "candidate_limit": 60,
+        "rerank": "not_needed",
+        "admission": "structured_fields",
+        "direct_candidates": 0,
+        "unsupported_candidates": 0
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": "OpenAlex h-index",
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [],
+        "search": null
+      }
+    },
+    {
+      "case": "混合主题搜索",
+      "iteration": 1,
+      "question": "查找机器人领域人才",
+      "http_status": 200,
+      "first_text_ms": 560,
+      "complete_ms": 561,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "a886a70f-f2d6-48ff-84ac-6903b94f750d",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 546,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 513,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 24,
+          "status": "success"
+        },
+        {
+          "name": "并行文本与向量召回",
+          "ms": 377,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 60,
+        "unresolved_conditions": [],
+        "metadata_unknown": 0,
+        "mode": "BM25",
+        "vector_status": "warming",
+        "dense_covered_people": 0,
+        "eligible_people": 906,
+        "lexical_candidates": 60,
+        "dense_candidates": 0,
+        "candidate_limit": 60,
+        "rerank": "not_configured",
+        "admission": "direct_topic_evidence",
+        "direct_candidates": 60,
+        "unsupported_candidates": 0
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "机器人领域相关"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "机器人领域相关",
+              "kind": "topic",
+              "fields": [
+                "领域",
+                "未来产业方向",
+                "细分关键词",
+                "技术角色定位",
+                "详细个人简介",
+                "代表成果",
+                "创业／项目经历"
+              ],
+              "op": "contains_any",
+              "values": [
+                "机器人"
+              ],
+              "related_values": [],
+              "relation": null,
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "any"
+        }
+      }
+    },
+    {
+      "case": "混合主题搜索",
+      "iteration": 2,
+      "question": "查找机器人领域人才",
+      "http_status": 200,
+      "first_text_ms": 311,
+      "complete_ms": 311,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "8038d3aa-af74-4127-b967-8002ffb5a0d9",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 1,
+      "reported_tokens": 4,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 294,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 272,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 20,
+          "status": "success"
+        },
+        {
+          "name": "并行文本与向量召回",
+          "ms": 169,
+          "status": "success"
+        },
+        {
+          "name": "模型调用 · bge-m3",
+          "ms": 106,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 60,
+        "unresolved_conditions": [],
+        "metadata_unknown": 0,
+        "mode": "BM25 + dense + RRF",
+        "vector_status": "ready",
+        "dense_covered_people": 906,
+        "eligible_people": 906,
+        "lexical_candidates": 60,
+        "dense_candidates": 60,
+        "candidate_limit": 60,
+        "rerank": "not_configured",
+        "admission": "direct_topic_evidence",
+        "direct_candidates": 60,
+        "unsupported_candidates": 2
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "机器人领域相关"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "机器人领域相关",
+              "kind": "topic",
+              "fields": [
+                "领域",
+                "未来产业方向",
+                "细分关键词",
+                "技术角色定位",
+                "详细个人简介",
+                "代表成果",
+                "创业／项目经历"
+              ],
+              "op": "contains_any",
+              "values": [
+                "机器人"
+              ],
+              "related_values": [],
+              "relation": null,
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "any"
+        }
+      }
+    },
+    {
+      "case": "混合主题搜索",
+      "iteration": 3,
+      "question": "查找机器人领域人才",
+      "http_status": 200,
+      "first_text_ms": 286,
+      "complete_ms": 288,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "5aeca412-fc5a-46c1-a5bf-8dc62296fd5e",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 271,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 243,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 19,
+          "status": "success"
+        },
+        {
+          "name": "并行文本与向量召回",
+          "ms": 140,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 60,
+        "unresolved_conditions": [],
+        "metadata_unknown": 0,
+        "mode": "BM25 + dense + RRF",
+        "vector_status": "ready",
+        "dense_covered_people": 906,
+        "eligible_people": 906,
+        "lexical_candidates": 60,
+        "dense_candidates": 60,
+        "candidate_limit": 60,
+        "rerank": "not_configured",
+        "admission": "direct_topic_evidence",
+        "direct_candidates": 60,
+        "unsupported_candidates": 2
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "机器人领域相关"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "机器人领域相关",
+              "kind": "topic",
+              "fields": [
+                "领域",
+                "未来产业方向",
+                "细分关键词",
+                "技术角色定位",
+                "详细个人简介",
+                "代表成果",
+                "创业／项目经历"
+              ],
+              "op": "contains_any",
+              "values": [
+                "机器人"
+              ],
+              "related_values": [],
+              "relation": null,
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "any"
+        }
+      }
+    },
+    {
+      "case": "复杂条件",
+      "iteration": 1,
+      "question": "查找有机器人研究背景并且有创业经历的人才",
+      "http_status": 200,
+      "first_text_ms": 10727,
+      "complete_ms": 10727,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "1c9941bf-9f61-4834-9087-64d693b81792",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 1,
+      "embedding_calls": 1,
+      "reported_tokens": 1947,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 10710,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 10688,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 23,
+          "status": "success"
+        },
+        {
+          "name": "人才查询规划",
+          "ms": 10421,
+          "status": "success"
+        },
+        {
+          "name": "模型调用 · qwen3.8",
+          "ms": 10402,
+          "status": "success"
+        },
+        {
+          "name": "并行文本与向量召回",
+          "ms": 104,
+          "status": "success"
+        },
+        {
+          "name": "模型调用 · bge-m3",
+          "ms": 92,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "需要模型识别意图"
+      },
+      "retrieval": {
+        "returned": 14,
+        "unresolved_conditions": [],
+        "metadata_unknown": 218,
+        "mode": "BM25 + dense + RRF",
+        "vector_status": "ready",
+        "dense_covered_people": 144,
+        "eligible_people": 144,
+        "lexical_candidates": 36,
+        "dense_candidates": 60,
+        "candidate_limit": 60,
+        "rerank": "not_configured",
+        "admission": "direct_topic_evidence",
+        "direct_candidates": 14,
+        "unsupported_candidates": 61
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "有创业经历",
+          "有机器人研究背景"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "有机器人研究背景",
+              "kind": "topic",
+              "fields": [
+                "领域",
+                "细分关键词",
+                "详细个人简介",
+                "代表成果"
+              ],
+              "op": "contains_any",
+              "values": [
+                "机器人",
+                "Robotics",
+                "机器人学"
+              ],
+              "related_values": [
+                "具身智能",
+                "自动化",
+                "机械臂",
+                "无人机",
+                "人机交互"
+              ],
+              "relation": null,
+              "relation_evidence": ""
+            },
+            {
+              "condition": "有创业经历",
+              "kind": "metadata",
+              "fields": [
+                "创业／项目经历"
+              ],
+              "op": "contains_any",
+              "values": [
+                "创业",
+                "创始人",
+                "联合创始人",
+                "CEO",
+                "CTO",
+                "Co-founder",
+                "Founder",
+                "Startup"
+              ],
+              "related_values": [],
+              "relation": null,
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "all"
+        }
+      }
+    },
+    {
+      "case": "复杂条件",
+      "iteration": 2,
+      "question": "查找有机器人研究背景并且有创业经历的人才",
+      "http_status": 200,
+      "first_text_ms": 177,
+      "complete_ms": 177,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "ea5541e0-c88c-4001-ba3b-d16185efc2ec",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 152,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 130,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 27,
+          "status": "success"
+        },
+        {
+          "name": "并行文本与向量召回",
+          "ms": 24,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 14,
+        "unresolved_conditions": [],
+        "metadata_unknown": 218,
+        "mode": "BM25 + dense + RRF",
+        "vector_status": "ready",
+        "dense_covered_people": 144,
+        "eligible_people": 144,
+        "lexical_candidates": 36,
+        "dense_candidates": 60,
+        "candidate_limit": 60,
+        "rerank": "not_configured",
+        "admission": "direct_topic_evidence",
+        "direct_candidates": 14,
+        "unsupported_candidates": 61
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "有创业经历",
+          "有机器人研究背景"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "有机器人研究背景",
+              "kind": "topic",
+              "fields": [
+                "领域",
+                "细分关键词",
+                "详细个人简介",
+                "代表成果"
+              ],
+              "op": "contains_any",
+              "values": [
+                "机器人",
+                "Robotics",
+                "机器人学"
+              ],
+              "related_values": [
+                "具身智能",
+                "自动化",
+                "机械臂",
+                "无人机",
+                "人机交互"
+              ],
+              "relation": null,
+              "relation_evidence": ""
+            },
+            {
+              "condition": "有创业经历",
+              "kind": "metadata",
+              "fields": [
+                "创业／项目经历"
+              ],
+              "op": "contains_any",
+              "values": [
+                "创业",
+                "创始人",
+                "联合创始人",
+                "CEO",
+                "CTO",
+                "Co-founder",
+                "Founder",
+                "Startup"
+              ],
+              "related_values": [],
+              "relation": null,
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "all"
+        }
+      }
+    },
+    {
+      "case": "复杂条件",
+      "iteration": 3,
+      "question": "查找有机器人研究背景并且有创业经历的人才",
+      "http_status": 200,
+      "first_text_ms": 163,
+      "complete_ms": 164,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "944006cb-0c78-4715-8faf-72d3fbd89a89",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 143,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 121,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 20,
+          "status": "success"
+        },
+        {
+          "name": "并行文本与向量召回",
+          "ms": 23,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "本地规则"
+      },
+      "retrieval": {
+        "returned": 14,
+        "unresolved_conditions": [],
+        "metadata_unknown": 218,
+        "mode": "BM25 + dense + RRF",
+        "vector_status": "ready",
+        "dense_covered_people": 144,
+        "eligible_people": 144,
+        "lexical_candidates": 36,
+        "dense_candidates": 60,
+        "candidate_limit": 60,
+        "rerank": "not_configured",
+        "admission": "direct_topic_evidence",
+        "direct_candidates": 14,
+        "unsupported_candidates": 61
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "有创业经历",
+          "有机器人研究背景"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "有机器人研究背景",
+              "kind": "topic",
+              "fields": [
+                "领域",
+                "细分关键词",
+                "详细个人简介",
+                "代表成果"
+              ],
+              "op": "contains_any",
+              "values": [
+                "机器人",
+                "Robotics",
+                "机器人学"
+              ],
+              "related_values": [
+                "具身智能",
+                "自动化",
+                "机械臂",
+                "无人机",
+                "人机交互"
+              ],
+              "relation": null,
+              "relation_evidence": ""
+            },
+            {
+              "condition": "有创业经历",
+              "kind": "metadata",
+              "fields": [
+                "创业／项目经历"
+              ],
+              "op": "contains_any",
+              "values": [
+                "创业",
+                "创始人",
+                "联合创始人",
+                "CEO",
+                "CTO",
+                "Co-founder",
+                "Founder",
+                "Startup"
+              ],
+              "related_values": [],
+              "relation": null,
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "all"
+        }
+      }
+    },
+    {
+      "case": "上下文排序",
+      "iteration": 1,
+      "question": "按OpenAlex h-index从高到低排序",
+      "http_status": 200,
+      "first_text_ms": 47,
+      "complete_ms": 48,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "f089384d-5773-4d2a-bdff-be3f97dbf66e",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 31,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 7,
+          "status": "success"
+        }
+      ],
+      "reused_sort": true,
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": "OpenAlex h-index",
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "机器人领域相关"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "机器人领域相关",
+              "kind": "topic",
+              "fields": [
+                "领域",
+                "未来产业方向",
+                "细分关键词",
+                "技术角色定位",
+                "详细个人简介",
+                "代表成果",
+                "创业／项目经历"
+              ],
+              "op": "contains_any",
+              "values": [
+                "机器人"
+              ],
+              "related_values": [],
+              "relation": null,
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "any"
+        }
+      }
+    },
+    {
+      "case": "上下文分页",
+      "iteration": 1,
+      "question": "下一页",
+      "http_status": 200,
+      "first_text_ms": 38,
+      "complete_ms": 39,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "ce2e9fc8-64e2-4bb2-b79d-f1144d3b6fa9",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 0,
+      "embedding_calls": 0,
+      "reported_tokens": 0,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 24,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 3,
+          "status": "success"
+        }
+      ],
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": "OpenAlex h-index",
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "机器人领域相关"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "机器人领域相关",
+              "kind": "topic",
+              "fields": [
+                "领域",
+                "未来产业方向",
+                "细分关键词",
+                "技术角色定位",
+                "详细个人简介",
+                "代表成果",
+                "创业／项目经历"
+              ],
+              "op": "contains_any",
+              "values": [
+                "机器人"
+              ],
+              "related_values": [],
+              "relation": null,
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "any"
+        }
+      }
+    },
+    {
+      "case": "上下文追加条件",
+      "iteration": 1,
+      "question": "其中当前机构为清华大学的",
+      "http_status": 200,
+      "first_text_ms": 10620,
+      "complete_ms": 10623,
+      "sse_done": true,
+      "error": null,
+      "trace_id": "48896dd2-881a-4eac-856b-4e028f6691b4",
+      "returned": 5,
+      "trace_status": "success",
+      "llm_calls": 1,
+      "embedding_calls": 0,
+      "reported_tokens": 2157,
+      "stages": [
+        {
+          "name": "准备上下文与检索",
+          "ms": 10604,
+          "status": "success"
+        },
+        {
+          "name": "人才结构化检索",
+          "ms": 10580,
+          "status": "success"
+        },
+        {
+          "name": "读取人才全表",
+          "ms": 19,
+          "status": "success"
+        },
+        {
+          "name": "人才查询规划",
+          "ms": 10439,
+          "status": "success"
+        },
+        {
+          "name": "模型调用 · qwen3.8",
+          "ms": 10422,
+          "status": "success"
+        },
+        {
+          "name": "并行文本与向量召回",
+          "ms": 14,
+          "status": "success"
+        }
+      ],
+      "plan_source": {
+        "source": "需要模型识别意图"
+      },
+      "retrieval": {
+        "returned": 8,
+        "unresolved_conditions": [],
+        "metadata_unknown": 1,
+        "mode": "BM25 + dense + RRF",
+        "vector_status": "ready",
+        "dense_covered_people": 35,
+        "eligible_people": 35,
+        "lexical_candidates": 8,
+        "dense_candidates": 35,
+        "candidate_limit": 60,
+        "rerank": "not_configured",
+        "admission": "direct_topic_evidence",
+        "direct_candidates": 8,
+        "unsupported_candidates": 27
+      },
+      "plan_summary": {
+        "intent": "filter",
+        "sort_by": null,
+        "descending": true,
+        "result_limit": null,
+        "evidence_conditions": [
+          "当前机构为清华大学",
+          "机器人领域相关"
+        ],
+        "search": {
+          "predicates": [
+            {
+              "condition": "机器人领域相关",
+              "kind": "topic",
+              "fields": [
+                "领域",
+                "未来产业方向",
+                "细分关键词",
+                "技术角色定位",
+                "详细个人简介",
+                "代表成果",
+                "创业／项目经历"
+              ],
+              "op": "contains_any",
+              "values": [
+                "机器人"
+              ],
+              "related_values": [],
+              "relation": null,
+              "relation_evidence": ""
+            },
+            {
+              "condition": "当前机构为清华大学",
+              "kind": "metadata",
+              "fields": [
+                "当前机构"
+              ],
+              "op": "contains_any",
+              "values": [
+                "清华大学"
+              ],
+              "related_values": [],
+              "relation": "current_affiliation",
+              "relation_evidence": ""
+            }
+          ],
+          "topic_mode": "all"
+        }
+      }
+    }
+  ]
+}

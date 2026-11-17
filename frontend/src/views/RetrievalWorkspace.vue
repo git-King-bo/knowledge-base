@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { createId } from '../lib/id'
+import { useUpdateGuard } from '../lib/updateSafety'
+import { draftKey, writeQuestionDraft, takeQuestionDraft } from '../lib/updateDraft'
 import { computed, reactive, ref, watch, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { request, streamKnowledge, searchKnowledge, fetchKnowledgeBaseSources } from '../lib/api'
 import type { KnowledgeBase, KnowledgeChunk, KnowledgeSource, ProviderConfig, RowSource, TalentResult, WebSearchMode, WebSource } from '../lib/types'
@@ -45,7 +48,7 @@ type ChatTurn = { id: number; question: string; answer: string; html: string;
   sources: KnowledgeChunk[]; webSources: WebSource[]; rowSources: RowSource[]; model: string; request: AskPayload;
   status: 'waiting' | 'streaming' | 'done' | 'stopped' | 'error' }
 const messages = ref<ChatTurn[]>([])
-const conversationId = ref<string>(crypto.randomUUID())
+const conversationId = ref<string>(createId())
 const saved = ref<{id:string;title:string;favorite:boolean;updated_at?:string}[]>([])
 const historySearch = ref('')
 const historyLoading = ref(false)
@@ -79,6 +82,23 @@ function switchSidebar(history: boolean) {
   if (history) void loadSaved()
 }
 const favorite = ref(false), feedback = ref(''), historyOpen = ref(false), saveNotice = ref('')
+const persistingChats = ref(0)
+useUpdateGuard({ label: props.mode === 'chat' ? '问答输入' : '检索输入', dirty: () => Boolean(question.value.trim()),
+  saveDraft: () => {
+    if (!currentUser.value) return false
+    try { return writeQuestionDraft(window.sessionStorage, draftKey(currentUser.value.id, props.mode), question.value) }
+    catch { return false }
+  },
+})
+useUpdateGuard({ label: '尚未成功保存的会话', dirty: () => saveNotice.value.startsWith('会话保存失败'), busy: () => persistingChats.value > 0 })
+onMounted(() => {
+  if (!currentUser.value) return
+  try {
+    const draft = takeQuestionDraft(window.sessionStorage, draftKey(currentUser.value.id, props.mode))
+    if (draft !== undefined) { question.value = draft; saveNotice.value = '已恢复更新前的输入草稿，请确认知识库和模型后发送。' }
+  } catch { /* Browser storage may be disabled. */ }
+})
+
 async function loadSaved() {
   if (!currentUser.value) return
   historyLoading.value = true; historyError.value = ''
@@ -88,10 +108,12 @@ async function loadSaved() {
 }
 async function saveChat() {
   if(!currentUser.value || !messages.value.length) return
+  persistingChats.value++
   try {
     await request('/conversations/'+conversationId.value, {method:'PUT',body:JSON.stringify({title:messages.value[0]?.question.slice(0,160)||'会话',messages:messages.value.map(({html,...rest})=>rest),favorite:favorite.value,feedback:feedback.value})})
     saveNotice.value='会话已保存';await loadSaved()
   } catch(e) { saveNotice.value='会话保存失败：'+String(e) }
+  finally { persistingChats.value-- }
 }
 async function openSaved(id:string) {
   if(busy.value || openingId.value || deletingId.value)return
@@ -140,7 +162,7 @@ function clearCitation() {
 function clearConversation() {
   if (busy.value) return
   messages.value = []
-  conversationId.value = crypto.randomUUID();favorite.value=false;feedback.value='';saveNotice.value=''
+  conversationId.value = createId();favorite.value=false;feedback.value='';saveNotice.value=''
   question.value = ''
   error.value = ''
   followOutput.value = true

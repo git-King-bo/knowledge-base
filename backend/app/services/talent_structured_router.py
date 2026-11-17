@@ -54,14 +54,62 @@ def _entity(query, sheets, field):
 
 def _topic(value, fields):
     value=value.strip()
-    if not value or len(value)>80 or re.search(r'[，,、；;和与或及/]|不含|排除|除了|至少|至多|以上|以下',value):
+    if not value or len(value)>80 or re.search(r'[，,、；;和与或及/]|不含|排除|除了|至少|至多|以上|以下|并且|而且|同时|以及',value):
         return None
     research=[f for f in ('领域','未来产业方向','细分关键词','研究方向','技术角色定位','详细个人简介','代表成果','创业／项目经历') if f in fields]
     if not research:return None
     return SearchPredicate(condition=f'{value}领域相关',kind='topic',fields=research,values=[value])
 
 
+def topic_expression(query, prefix, suffix, *, legacy=False):
+    activity = '' if legacy else r'(?:从事\s*)?'
+    research = '' if legacy else r'(?:的?研究)?'
+    match = re.fullmatch(prefix + activity + r'(.+?)(?:领域|方向)' + research + r'(?:相关)?' + suffix, query, re.I)
+    return match[1].strip() if match else None
+
+
+def repair_legacy_topic(previous, previous_question, sheets, current_question=None):
+    """Repair only the old parser's provable activity-prefix capture, not user intent."""
+    if not previous_question or not isinstance(previous, dict):
+        return previous
+    query = previous_question.strip().rstrip('。？！?!').strip()
+    prefix = r'(?:请)?(?:帮我)?(?:查找|查询|筛选|找出|列出|搜索)?\s*'
+    suffix = r'(?:的)?(?:人才|人员)(?:有哪些)?'
+    old = topic_expression(query, prefix, suffix, legacy=True)
+    clean = topic_expression(query, prefix, suffix)
+    if not old or not clean or old == clean:
+        return previous
+    if current_question:
+        current = topic_expression(current_question.strip().rstrip('。？！?!').strip(), prefix, suffix)
+        if current and current.casefold() == clean.casefold():
+            clean = current
+    fields = {f for sheet in sheets for f in sheet.headers}
+    replacement = _topic(clean, fields)
+    original = _topic(old, fields)
+    if replacement is None or original is None:
+        return previous
+    plan = TalentPlan.model_validate(previous)
+    if not plan.search:
+        return previous
+    wrong = f'{old}领域相关'
+    matches = [p for p in plan.search.predicates if p.kind == 'topic' and p.condition == wrong
+               and p.values == [old] and p.fields == original.fields and p.op == original.op
+               and p.relation is None and not p.related_values]
+    if len(matches) != 1:
+        return previous
+    predicates = [replacement if p is matches[0] else p for p in plan.search.predicates]
+    return plan.model_copy(update={
+        'search': plan.search.model_copy(update={'predicates': predicates}),
+        'evidence_conditions': list(dict.fromkeys(replacement.condition if c == wrong else c for c in plan.evidence_conditions)),
+        'topic_condition': replacement.condition if plan.topic_condition == wrong else plan.topic_condition,
+    }).model_dump()
+
+
 def compile_structured(question, sheets):
+    from app.services.talent_semantics import local_geo_intent, compile_intent
+    geo = local_geo_intent(question)
+    if geo is not None:
+        return compile_intent(geo, question, sheets)
     fields={f for s in sheets for f in s.headers}
     sort=sort_action(question,fields)
     if sort:return TalentPlan(sort_by=sort['field'],descending=sort['descending'])
@@ -108,8 +156,8 @@ def compile_structured(question, sheets):
                 predicate=SearchPredicate(condition=f'当前机构属于{entity}',kind='metadata',fields=['当前机构'],
                     values=[entity],relation='current_affiliation')
         if predicate is None:
-            topic_match=re.fullmatch(prefix+r'(.+?)(?:领域|方向)(?:相关)?'+suffix,query,re.I)
-            if topic_match:predicate=_topic(topic_match[1],fields)
+            topic = topic_expression(query, prefix, suffix)
+            if topic:predicate=_topic(topic,fields)
     if predicate is None:
         from app.services.talent_search import rule_plan
         return rule_plan(question,sheets)
