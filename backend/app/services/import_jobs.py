@@ -9,12 +9,12 @@ import threading
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, update
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import now, actor
 from app.db.models import (KnowledgeSourceModel, KnowledgeChunkModel, KnowledgeChunkEmbeddingModel,
-    SourceIndexModel, ImportJobModel, TalentModel, ChunkTalentModel, KnowledgeBaseSourceModel)
+    SourceIndexModel, ImportJobModel, TalentModel, ChunkTalentModel, KnowledgeBaseSourceModel,KnowledgeBaseModel,TrashModel)
 from app.db.session import SessionLocal
 from app.repositories.sqlite import KnowledgeIngestionRepository
 from app.services.embeddings import EmbeddingClient
@@ -27,9 +27,24 @@ class StaleRevision(RuntimeError):
     pass
 
 def fingerprint():
-    return hashlib.sha256(json.dumps({'parser':'v3-record-ownership','chunk':settings.knowledge_chunk_max_chars,
+    from app.services.talent_documents import VERSION
+    data={'parser':'v5-field-children-atomic','documents':VERSION,'chunk':settings.knowledge_chunk_max_chars,
         'overlap':settings.knowledge_chunk_overlap_chars,'embedding_url':settings.embedding_api_url,
-        'embedding_model':settings.embedding_model},sort_keys=True).encode()).hexdigest()
+        'embedding_model':settings.embedding_model,'embedding_dimensions':settings.embedding_dimensions}
+    if settings.embedding_revision:data['embedding_revision']=settings.embedding_revision
+    return hashlib.sha256(json.dumps(data,sort_keys=True).encode()).hexdigest()
+
+
+def compatible_embedding_fingerprints():
+    # v4's digest proves the same endpoint/model/dimensions. Only identical
+    # document hashes may reuse its vectors, never old models or changed text.
+    result={fingerprint()}
+    if not settings.embedding_revision:
+        old={'parser':'v4-field-children-atomic','chunk':settings.knowledge_chunk_max_chars,
+            'overlap':settings.knowledge_chunk_overlap_chars,'embedding_url':settings.embedding_api_url,
+            'embedding_model':settings.embedding_model,'embedding_dimensions':settings.embedding_dimensions}
+        result.add(hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest())
+    return result
 
 
 def job_schema(job):
@@ -55,6 +70,7 @@ def enqueue(db, source_id, base_id, *, stage='queued'):
     user=actor.get()
     job=ImportJobModel(id=str(uuid4()), source_id=source_id,base_id=base_id,user_id=user.id if user else None,
         status='queued',stage=stage,completed=0,total=0,attempts=0,cancel_requested=False,created_at=now(),updated_at=now())
+    job.index_fingerprint=fingerprint()
     db.add(job);db.commit();db.refresh(job)
     return job
 
@@ -72,20 +88,35 @@ def talent_index_incomplete(db, source_id):
     return chunks == 0 or owned != chunks or people != talents
 
 
+def embedding_index_incomplete(db,source_id):
+    if not settings.embedding_api_url:return False
+    count=db.scalar(select(func.count()).select_from(KnowledgeChunkModel).where(KnowledgeChunkModel.source_id==source_id))
+    query=select(func.count()).select_from(KnowledgeChunkEmbeddingModel).join(KnowledgeChunkModel).where(
+        KnowledgeChunkModel.source_id==source_id,KnowledgeChunkEmbeddingModel.embedding_model==settings.embedding_model)
+    if settings.embedding_dimensions:query=query.where(KnowledgeChunkEmbeddingModel.embedding_dim==settings.embedding_dimensions)
+    return not count or db.scalar(query)!=count
+
+
 def queue_index_repairs(db):
     """Idempotently schedule legacy ownership repairs; failed jobs need explicit retry."""
     pending = db.scalar(select(func.count()).select_from(ImportJobModel).where(ImportJobModel.status.in_(['queued','running'])))
-    sources = db.scalars(select(KnowledgeSourceModel).where(KnowledgeSourceModel.status == 'parsed'))
+    active=select(KnowledgeBaseSourceModel.source_id).join(KnowledgeBaseModel).where(
+        KnowledgeBaseModel.status=='active',~KnowledgeBaseModel.id.in_(select(TrashModel.base_id)))
+    sources = db.scalars(select(KnowledgeSourceModel).where(KnowledgeSourceModel.status == 'parsed',KnowledgeSourceModel.id.in_(active)))
     for source in list(sources):
         if pending >= settings.max_pending_jobs:
             break
-        if not talent_index_incomplete(db, source.id):
+        index=db.get(SourceIndexModel,source.id)
+        if not talent_index_incomplete(db, source.id) and not embedding_index_incomplete(db,source.id) and index and index.fingerprint==fingerprint() and index.revision==index.indexed_revision:
             continue
+        from sqlalchemy import or_,and_
         existing = db.scalar(select(ImportJobModel.id).where(ImportJobModel.source_id == source.id,
-            ImportJobModel.status.in_(['queued','running','failed','cancelled'])))
+            or_(ImportJobModel.status.in_(['queued','running']),and_(ImportJobModel.status.in_(['failed','cancelled']),
+                ImportJobModel.index_fingerprint==fingerprint()))))
         if existing:
             continue
-        base_id = db.scalar(select(KnowledgeBaseSourceModel.knowledge_base_id).where(KnowledgeBaseSourceModel.source_id == source.id))
+        base_id = db.scalar(select(KnowledgeBaseSourceModel.knowledge_base_id).join(KnowledgeBaseModel).where(
+            KnowledgeBaseSourceModel.source_id == source.id,KnowledgeBaseModel.status=='active',~KnowledgeBaseModel.id.in_(select(TrashModel.base_id))))
         if base_id:
             enqueue(db, source.id, base_id, stage='repair_record_index')
             pending += 1
@@ -124,7 +155,13 @@ def process_job(db,job):
     source=db.get(KnowledgeSourceModel,job.source_id)
     if not source:raise ValueError('源文件不存在')
     index=db.get(SourceIndexModel,source.id)
-    starting_revision=index.revision if index else 1
+    if index is None:
+        path=Path(source.storage_path)
+        digest=hashlib.sha256(path.read_bytes() if path.is_file() else source.content_text.encode()).hexdigest()
+        index=SourceIndexModel(source_id=source.id,sha256=digest,fingerprint='',revision=1,indexed_revision=0,edited=False)
+        db.add(index);db.commit()
+    starting_revision=index.revision
+    job.index_fingerprint=fingerprint()
     def checkpoint(stage,completed=0,total=0):
         db.refresh(job)
         if job.cancel_requested:raise InterruptedError('任务已取消')
@@ -133,55 +170,62 @@ def process_job(db,job):
             if index.revision!=starting_revision:raise StaleRevision('处理中资料已更新，已重新排队')
         job.stage=stage;job.completed=completed;job.total=total;job.updated_at=now();db.commit()
     checkpoint('parsing')
-    # Resume from persisted chunks unless source edits require a fresh text index.
     talents=list(db.scalars(select(TalentModel).where(TalentModel.source_id==source.id).order_by(TalentModel.sheet_name,TalentModel.source_row)))
-    stale=bool(index and index.indexed_revision!=index.revision and index.edited)
-    existing_chunks=repo.list_chunks(source_id=source.id)
-    if not existing_chunks or stale or talent_index_incomplete(db, source.id):
-        if not talents:
-            result=subprocess.run([sys.executable,'-m','app.services.parse_worker',str(Path(source.storage_path).resolve()),source.filename,source.id],
-                capture_output=True,text=True,timeout=240 if settings.ocr_enabled else 60)
-            parsed=json.loads(result.stdout) if result.stdout.strip() else {'error':'解析进程失败'}
-            if result.returncode or parsed.get('error'):raise ValueError(parsed.get('error','解析失败'))
-            repo.update_source_text(source.id,content_text=parsed['text'],mime_type=parsed['mime_type'])
-            for record in parsed['talents']:
-                if not db.get(TalentModel,record['id']):db.add(TalentModel(**record,created_at=now()))
-            db.commit()
-            talents=list(db.scalars(select(TalentModel).where(TalentModel.source_id==source.id).order_by(TalentModel.sheet_name,TalentModel.source_row)))
-        drafts=[];owners=[]
-        if talents:
-            for talent in talents:
-                fields=json.loads(talent.raw_data_json)
-                text='\n'.join(f'{k}：{v}' for k,v in fields.items() if v is not None)
-                for chunk in split_into_chunks(text,max_chars=settings.knowledge_chunk_max_chars,overlap=settings.knowledge_chunk_overlap_chars):
-                    drafts.append({'chunk_index':len(drafts),'title':talent.name,'content':chunk.content,'token_count':chunk.token_count,'vector':chunk.vector})
-                    owners.append(talent.id)
-            repo.update_source_text(source.id,content_text='\n\n'.join(json.dumps(json.loads(t.raw_data_json),ensure_ascii=False) for t in talents))
-        else:
-            for chunk in split_into_chunks(source.content_text,max_chars=settings.knowledge_chunk_max_chars,overlap=settings.knowledge_chunk_overlap_chars):
-                drafts.append({'chunk_index':chunk.chunk_index,'title':source.filename,'content':chunk.content,'token_count':chunk.token_count,'vector':chunk.vector})
-        old_ids=select(KnowledgeChunkModel.id).where(KnowledgeChunkModel.source_id==source.id)
-        db.execute(delete(ChunkTalentModel).where(ChunkTalentModel.chunk_id.in_(old_ids)));db.commit()
-        existing_chunks=repo.replace_chunks(source.id,drafts)
-        for chunk,talent_id in zip(existing_chunks,owners):db.add(ChunkTalentModel(chunk_id=chunk.id,talent_id=talent_id))
+    if not talents and (not source.content_text or Path(source.filename).suffix.lower()=='.xlsx'):
+        result=subprocess.run([sys.executable,'-m','app.services.parse_worker',str(Path(source.storage_path).resolve()),source.filename,source.id],
+            capture_output=True,text=True,timeout=240 if settings.ocr_enabled else 60)
+        parsed=json.loads(result.stdout) if result.stdout.strip() else {'error':'解析进程失败'}
+        if result.returncode or parsed.get('error'):raise ValueError(parsed.get('error','解析失败'))
+        repo.update_source_text(source.id,content_text=parsed['text'],mime_type=parsed['mime_type'])
+        for record in parsed['talents']:
+            if not db.get(TalentModel,record['id']):db.add(TalentModel(**record,created_at=now()))
         db.commit()
-    checkpoint('embedding',0,len(existing_chunks))
+        talents=list(db.scalars(select(TalentModel).where(TalentModel.source_id==source.id).order_by(TalentModel.sheet_name,TalentModel.source_row)))
+    drafts=[];owners=[]
+    if talents:
+        from app.services.talent_documents import field_chunks
+        for talent in talents:
+            for draft in field_chunks(json.loads(talent.raw_data_json),max_chars=settings.knowledge_chunk_max_chars,overlap=settings.knowledge_chunk_overlap_chars):
+                draft['chunk_index']=len(drafts);drafts.append(draft);owners.append(talent.id)
+    else:
+        for chunk in split_into_chunks(source.content_text,max_chars=settings.knowledge_chunk_max_chars,overlap=settings.knowledge_chunk_overlap_chars):
+            drafts.append({'chunk_index':chunk.chunk_index,'title':source.filename,'content':chunk.content,'token_count':chunk.token_count,'vector':chunk.vector})
+    if not drafts:raise ValueError('没有可索引的内容')
     client=EmbeddingClient(db=db,knowledge_base_id=job.base_id)
-    if client.enabled:
-        ready=set(db.scalars(select(KnowledgeChunkEmbeddingModel.chunk_id).where(KnowledgeChunkEmbeddingModel.embedding_model==settings.embedding_model)))
-        pending=[c for c in existing_chunks if c.id not in ready]
-        done=len(existing_chunks)-len(pending)
-        for start in range(0,len(pending),max(1,settings.embedding_batch_size)):
-            checkpoint('embedding',done,len(existing_chunks))
-            batch=pending[start:start+max(1,settings.embedding_batch_size)]
-            from app.core.limits import embed_with_budget
-            vectors=embed_with_budget(db,job,client,[c.content for c in batch])
-            repo.replace_chunk_embeddings(list(zip([c.id for c in batch],vectors,strict=True)),embedding_model=settings.embedding_model)
-            done+=len(batch)
-    checkpoint('complete',len(existing_chunks),len(existing_chunks))
-    if index:index.indexed_revision=starting_revision;index.fingerprint=fingerprint()
-    repo.set_source_error_message(source.id,None)
-    job.status='done';job.error=None;job.updated_at=now();db.commit()
+    from app.services.index_staging import stage_embeddings,read_vectors
+    reuse={}
+    if index.fingerprint in compatible_embedding_fingerprints():
+        statement=select(KnowledgeChunkModel.content,KnowledgeChunkEmbeddingModel.chunk_id).join(KnowledgeChunkEmbeddingModel).where(
+            KnowledgeChunkModel.source_id==source.id,KnowledgeChunkEmbeddingModel.embedding_model==settings.embedding_model)
+        if settings.embedding_dimensions:statement=statement.where(KnowledgeChunkEmbeddingModel.embedding_dim==settings.embedding_dimensions)
+        for content,chunk_id in db.execute(statement).yield_per(128):reuse[hashlib.sha256(content.encode()).hexdigest()]=chunk_id
+    staged=stage_embeddings(db,job,client,drafts,starting_revision,fingerprint(),checkpoint,reuse=reuse)
+    checkpoint('publishing',len(drafts),len(drafts))
+    # Version fence and all index replacements share ONE transaction. Failure,
+    # cancellation or an edit keeps the previously published index intact.
+    try:
+        fence=db.execute(update(SourceIndexModel).where(SourceIndexModel.source_id==source.id,SourceIndexModel.revision==starting_revision)
+            .values(indexed_revision=starting_revision,fingerprint=fingerprint()))
+        if fence.rowcount!=1:raise StaleRevision('处理中资料已更新，已重新排队')
+        old_ids=select(KnowledgeChunkModel.id).where(KnowledgeChunkModel.source_id==source.id)
+        db.execute(delete(ChunkTalentModel).where(ChunkTalentModel.chunk_id.in_(old_ids)))
+        chunks=repo.replace_chunks(source.id,drafts,commit=False)
+        for chunk,talent_id in zip(chunks,owners):db.add(ChunkTalentModel(chunk_id=chunk.id,talent_id=talent_id))
+        if staged:
+            from itertools import islice
+            vectors=read_vectors(staged)
+            for start in range(0,len(chunks),100):
+                batch=chunks[start:start+100];part=list(islice(vectors,len(batch)))
+                if len(part)!=len(batch):raise ValueError('Staged index is incomplete')
+                repo.replace_chunk_embeddings(list(zip([c.id for c in batch],part,strict=True)),embedding_model=settings.embedding_model,commit=False)
+        changed=db.execute(update(ImportJobModel).where(ImportJobModel.id==job.id,ImportJobModel.cancel_requested.is_(False)).values(
+            status='done',stage='complete',completed=len(chunks),total=len(chunks),error=None,updated_at=now()))
+        if changed.rowcount!=1:raise InterruptedError('任务已取消')
+        db.commit()
+    except Exception:
+        db.rollback();raise
+    if staged:staged.unlink(missing_ok=True)
+    db.refresh(job)
 
 
 class Worker:
@@ -195,6 +239,8 @@ class Worker:
         try:fcntl.flock(self.lock_file,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:self.lock_file.close();self.lock_file=None;return
         with SessionLocal() as db:
+            from app.services.index_staging import cleanup_staging
+            cleanup_staging(db)
             for job in db.scalars(select(ImportJobModel).where(ImportJobModel.status=='running')):
                 job.status='queued';job.updated_at=now()
             db.commit()
@@ -215,6 +261,10 @@ class Worker:
                             source=db.get(KnowledgeSourceModel,job.source_id)
                             if source:source.error_message=job.error
                             db.commit();log.warning('import_failed job=%s type=%s',job.id,type(exc).__name__)
+                            if isinstance(exc,(StaleRevision,InterruptedError)):
+                                root=Path(settings.upload_dir).parent/'index-staging'
+                                for path in root.glob(f'{job.id}-*.jsonl'):path.unlink(missing_ok=True)
+                        if job.status=='done':queue_index_repairs(db)
                         continue
             except Exception:
                 log.exception('worker_iteration_failed')

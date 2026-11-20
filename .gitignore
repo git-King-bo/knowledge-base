@@ -49,9 +49,14 @@ frontend/.env.*
 *.db-wal
 deploy/production.env
 deploy/company.env
+deploy/mysql.env
 deploy/company-version.env
 deploy/.credentials/
 releases/
 
 # Private model runtime configuration
 **/models.env
+
+# Frontend browser test output
+frontend/playwright-report/
+frontend/test-results/

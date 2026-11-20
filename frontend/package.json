@@ -10,7 +10,11 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "test": "node tests/run.mjs",
-    "test:dialog": "node tests/run-dialog.mjs"
+    "test:dialog": "node tests/run-dialog.mjs",
+    "typecheck": "vue-tsc -b && tsc -p tsconfig.e2e.json",
+    "build:assets": "vite build",
+    "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test --grep @smoke"
   },
   "dependencies": {
     "dompurify": "^3.4.13",
@@ -21,6 +25,7 @@
     "vue": "^3.5.39"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.1",
     "@types/node": "^24.13.2",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vue/tsconfig": "^0.9.1",

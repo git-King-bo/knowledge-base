@@ -35,6 +35,11 @@ def _entity(query, sheets, field):
     """Only accept an unambiguous value actually present in this authorized corpus."""
     if not query or len(query)>150:
         return None
+    from app.services.search_vocabulary import aliases as entity_aliases,contains
+    equivalents=entity_aliases(query,institution=True)
+    if len(equivalents)>1 and any(contains(str(row['fields'].get(field,'')),alias)
+            for sheet in sheets for row in sheet.rows for alias in equivalents):
+        return equivalents[0]
     aliases={}
     for sheet in sheets:
         for row in sheet.rows:
@@ -106,13 +111,17 @@ def repair_legacy_topic(previous, previous_question, sheets, current_question=No
 
 
 def compile_structured(question, sheets):
-    from app.services.talent_semantics import local_geo_intent, compile_intent
+    from app.services.talent_semantics import local_geo_intent, local_metric_intent,local_name_intent, compile_intent
     geo = local_geo_intent(question)
     if geo is not None:
         return compile_intent(geo, question, sheets)
     fields={f for s in sheets for f in s.headers}
+    metric=local_metric_intent(question,fields)
+    if metric is not None:return compile_intent(metric,question,sheets)
+    named=local_name_intent(question,sheets)
+    if named is not None:return compile_intent(named,question,sheets)
     sort=sort_action(question,fields)
-    if sort:return TalentPlan(sort_by=sort['field'],descending=sort['descending'])
+    if sort:return compile_intent({'answer_mode':'list','sort_by':sort['field'],'descending':sort['descending']},question,sheets)
     query=re.sub(r'\s+',' ',question).strip().rstrip('。？！?!').strip()
     prefix=r'(?:请)?(?:帮我)?(?:查找|查询|筛选|找出|列出|搜索)?\s*'
     suffix=r'(?:的)?(?:人才|人员)(?:有哪些)?'
@@ -130,26 +139,11 @@ def compile_structured(question, sheets):
         employment=re.fullmatch(prefix+r'在\s*(.+?)\s*工作过的(?:有哪些|人才|人员)',query,re.I)
         institution=re.fullmatch(prefix+r'(.+?)'+suffix,query,re.I)
         explicit=re.fullmatch(prefix+r'(?:当前机构(?:列)?(?:为|包含|是|[:：=])|当前任职(?:于|在)?)\s*(.+?)(?:的人才)?',query,re.I)
-        institution_topic=re.fullmatch(prefix+r'(.+?)(.+?)(?:领域|方向)(?:相关)?'+suffix,query,re.I)
         if employment:
             entity=_entity(employment[1],sheets,'当前机构')
             if entity:
                 predicate=SearchPredicate(condition=f'在{entity}有任职经历（含现任）',kind='metadata',
                     fields=['当前机构','工作经历'],values=[entity],relation='employment_experience',relation_evidence=question)
-        elif institution_topic:
-            # Pick the longest institution prefix that is supported by current
-            # affiliation data; the residual phrase is one literal topic.
-            joined=institution_topic[1]+institution_topic[2]
-            candidates=[]
-            for end in range(1,len(joined)):
-                entity=_entity(joined[:end],sheets,'当前机构')
-                topic=_topic(joined[end:],fields)
-                if entity and topic:candidates.append((end,entity,topic))
-            if candidates:
-                _,entity,topic=max(candidates,key=lambda item:item[0])
-                current=SearchPredicate(condition=f'当前机构属于{entity}',kind='metadata',fields=['当前机构'],values=[entity],relation='current_affiliation')
-                return bind_relations(TalentPlan(evidence_conditions=[current.condition,topic.condition],topic_condition=topic.condition,
-                    search=SearchSpec(predicates=[current,topic],topic_mode='all')),question)
         if predicate is None and (institution or explicit):
             entity=_entity((explicit or institution)[1],sheets,'当前机构')
             if entity:
@@ -157,8 +151,18 @@ def compile_structured(question, sheets):
                     values=[entity],relation='current_affiliation')
         if predicate is None:
             topic = topic_expression(query, prefix, suffix)
-            if topic:predicate=_topic(topic,fields)
+            if topic:
+                # Only a whole controlled vocabulary value is an atomic topic.
+                # Institution + activity + topic and unknown free text require
+                # semantic planning; an arbitrary substring is never executable.
+                from app.services.search_vocabulary import known_topic
+                controlled={normalized(part) for sheet in sheets for row in sheet.rows
+                    for field in ('领域','未来产业方向','细分关键词','研究方向')
+                    for part in re.split(r'[、,，;；|\n]',str(row['fields'].get(field,''))) if part.strip()}
+                if known_topic(topic) or normalized(topic) in controlled:predicate=_topic(topic,fields)
     if predicate is None:
+        # The legacy domain+metric compiler checks the complete remainder and
+        # only binds exact authorized domain values; it is not a topic wildcard.
         from app.services.talent_search import rule_plan
         return rule_plan(question,sheets)
     return bind_relations(TalentPlan(evidence_conditions=[predicate.condition],

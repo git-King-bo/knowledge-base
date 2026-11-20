@@ -1,0 +1,151 @@
+name: Frontend Release
+run-name: Frontend v${{ inputs.version }} by @${{ github.actor }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Frontend version, e.g. 0.2.0 (without v)'
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: frontend-production
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      image: ${{ steps.release.outputs.image }}
+      image_id: ${{ steps.package.outputs.image_id }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate version and exact main commit
+        id: release
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ && ${#VERSION} -le 32 ]]
+          tag="frontend-v$VERSION"
+          image_tag="$tag-${GITHUB_SHA:0:12}"
+          tags=$(git ls-remote --tags origin "refs/tags/$tag")
+          if [[ -n "$tags" ]]; then
+            echo 'Version already exists; rerun failed jobs instead.' >&2
+            exit 1
+          fi
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/frontend-ci.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=100")
+          jq -e '[.workflow_runs[] | select(.head_branch == "main" and .conclusion == "success")] | length > 0' <<< "$runs"
+          echo "version=$image_tag" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "image=knowledge-company-frontend:$image_tag" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-frontend
+      - run: pnpm typecheck
+        working-directory: frontend
+      - run: pnpm test
+        working-directory: frontend
+      - name: Build once and package
+        id: package
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          TAG: ${{ steps.release.outputs.tag }}
+          IMAGE: ${{ steps.release.outputs.image }}
+        run: |
+          docker build --platform linux/amd64 -f deploy/Dockerfile.frontend \
+            --build-arg "VITE_APP_VERSION=$VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$TAG" -t "$IMAGE" .
+          mkdir release
+          docker save -o release/images.tar "$IMAGE"
+          image_id=$(docker image inspect --format '{{.Id}}' "$IMAGE")
+          echo "image_id=$image_id" >> "$GITHUB_OUTPUT"
+          jq -n --arg version "$TAG" --arg frontend_version "$VERSION" \
+            --arg sha "$GITHUB_SHA" --arg image "$IMAGE" --arg image_id "$image_id" \
+            --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{version:$version,frontend_version:$frontend_version,sha:$sha,image:$image,image_id:$image_id,run:$run}' > release/manifest.json
+          cp deploy/frontend-apply.sh deploy/check-frontend.sh release/
+          cd release
+          sha256sum images.tar manifest.json frontend-apply.sh check-frontend.sh > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-release
+          path: release
+          retention-days: 14
+          if-no-files-found: error
+  e2e:
+    needs: build
+    uses: ./.github/workflows/frontend-e2e.yml
+    with:
+      artifact: frontend-release
+      suite: full
+      image: ${{ needs.build.outputs.image }}
+  deploy:
+    needs: [build, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: frontend-production
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-release
+          path: release
+      - name: Transfer and deploy only web
+        env:
+          SSH_HOST: ${{ vars.FRONTEND_SSH_HOST }}
+          SSH_USER: ${{ vars.FRONTEND_SSH_USER }}
+          SSH_PORT: ${{ vars.FRONTEND_SSH_PORT || '22' }}
+          PUBLIC_URL: ${{ vars.FRONTEND_PUBLIC_URL }}
+          SSH_KEY: ${{ secrets.FRONTEND_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.FRONTEND_SSH_KNOWN_HOSTS }}
+          VERSION: ${{ needs.build.outputs.version }}
+          IMAGE_ID: ${{ needs.build.outputs.image_id }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ && "$SSH_PORT" =~ ^[0-9]+$ ]]
+          [[ "$PUBLIC_URL" =~ ^https?://[A-Za-z0-9.:/-]+$ ]]
+          [[ -n "$SSH_KEY" && -n "$KNOWN_HOSTS" ]]
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/frontend_key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/frontend_key" "$HOME/.ssh/known_hosts"
+          trap 'rm -f "$HOME/.ssh/frontend_key"' EXIT
+          remote="$SSH_USER@$SSH_HOST"
+          incoming="/opt/knowledge-base/incoming/$VERSION-$GITHUB_RUN_ID"
+          ssh_args=(-i "$HOME/.ssh/frontend_key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          (cd release && sha256sum -c SHA256SUMS)
+          ssh "${ssh_args[@]}" -p "$SSH_PORT" "$remote" "mkdir -p '$incoming' && chmod 700 '$incoming'"
+          scp "${ssh_args[@]}" -P "$SSH_PORT" release/* "$remote:$incoming/"
+          ssh "${ssh_args[@]}" -p "$SSH_PORT" "$remote" "cd '$incoming' && sha256sum -c SHA256SUMS && bash frontend-apply.sh '$VERSION' '$PUBLIC_URL' '$IMAGE_ID'"
+          if ! bash release/check-frontend.sh "$PUBLIC_URL" "$VERSION"; then
+            ssh "${ssh_args[@]}" -p "$SSH_PORT" "$remote" "cd '$incoming' && bash frontend-apply.sh '$VERSION' '$PUBLIC_URL' '$IMAGE_ID' rollback"
+            exit 1
+          fi
+  publish:
+    needs: [build, e2e, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-release
+          path: release
+      - name: Publish the deployed commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --json targetCommitish --jq .targetCommitish > /tmp/release-target; then
+            [[ "$(cat /tmp/release-target)" == "$GITHUB_SHA" ]]
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Frontend $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" release/manifest.json release/SHA256SUMS --clobber

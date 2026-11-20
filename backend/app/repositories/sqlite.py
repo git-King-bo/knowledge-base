@@ -536,7 +536,7 @@ class KnowledgeIngestionRepository:
             statement = statement.where(KnowledgeChunkModel.source_id == source_id)
         return [_chunk_to_schema(item) for item in self.db.scalars(statement).all()]
 
-    def replace_chunks(self, source_id: str, chunks: list[dict[str, object]]) -> list[KnowledgeChunk]:
+    def replace_chunks(self, source_id: str, chunks: list[dict[str, object]], *, commit: bool = True) -> list[KnowledgeChunk]:
         chunk_ids_subquery = select(KnowledgeChunkModel.id).where(KnowledgeChunkModel.source_id == source_id)
         self.db.query(KnowledgeChunkEmbeddingModel).filter(
             KnowledgeChunkEmbeddingModel.chunk_id.in_(chunk_ids_subquery)
@@ -565,7 +565,8 @@ class KnowledgeIngestionRepository:
             source.chunk_count = len(created)
             source.updated_at = _now()
             source.error_message = None
-        self.db.commit()
+        self.db.flush()
+        if commit:self.db.commit()
         return created
 
     def replace_chunk_embeddings(
@@ -573,6 +574,7 @@ class KnowledgeIngestionRepository:
         embeddings: list[tuple[str, list[float]]],
         *,
         embedding_model: str,
+        commit: bool = True,
     ) -> None:
         if not embeddings:
             return
@@ -590,7 +592,8 @@ class KnowledgeIngestionRepository:
                     created_at=_now(),
                 )
             )
-        self.db.commit()
+        self.db.flush()
+        if commit:self.db.commit()
 
     def mark_source_failed(self, source_id: str, error_message: str) -> KnowledgeSource | None:
         source = self.db.get(KnowledgeSourceModel, source_id)
@@ -637,6 +640,7 @@ class KnowledgeIngestionRepository:
         lexical_weight: float | None = None,
         embedding_weight: float | None = None,
         knowledge_base_id: str | None = None,
+        talent_ids: list[str] | None = None,
     ) -> list[KnowledgeChunk]:
         from app.services.agent_trace import trace_note, trace_stage
         with trace_stage('本地词项向量化'):
@@ -656,12 +660,18 @@ class KnowledgeIngestionRepository:
             KnowledgeChunkEmbeddingModel,
             KnowledgeChunkModel.id == KnowledgeChunkEmbeddingModel.chunk_id,
         )
+        from sqlalchemy.orm import load_only
+        statement=statement.options(load_only(KnowledgeChunkEmbeddingModel.chunk_id,KnowledgeChunkEmbeddingModel.embedding_model,
+            KnowledgeChunkEmbeddingModel.embedding_dim,KnowledgeChunkEmbeddingModel.created_at))
         active_sources = select(KnowledgeBaseSourceModel.source_id).join(
             KnowledgeBaseModel, KnowledgeBaseModel.id == KnowledgeBaseSourceModel.knowledge_base_id
         ).where(KnowledgeBaseModel.status == "active")
         if knowledge_base_id:
             active_sources = active_sources.where(KnowledgeBaseModel.id == knowledge_base_id)
         statement = statement.where(KnowledgeChunkModel.source_id.in_(active_sources))
+        if talent_ids is not None:
+            from app.db.models import ChunkTalentModel
+            statement=statement.where(KnowledgeChunkModel.id.in_(select(ChunkTalentModel.chunk_id).where(ChunkTalentModel.talent_id.in_(talent_ids))))
         from app.db.models import SourceIndexModel
         stale_sources = select(SourceIndexModel.source_id).where(SourceIndexModel.edited.is_(True), SourceIndexModel.revision != SourceIndexModel.indexed_revision)
         statement = statement.where(~KnowledgeChunkModel.source_id.in_(stale_sources))
@@ -671,8 +681,17 @@ class KnowledgeIngestionRepository:
         dense = {}
         if query_embedding:
             from app.services.retrieval_cache import dense_scores
+            compatible=rows
+            if settings.app_env=='production':
+                from app.services.import_jobs import fingerprint
+                current=set(self.db.scalars(select(SourceIndexModel.source_id).where(SourceIndexModel.fingerprint==fingerprint())))
+                compatible=[(r,e) for r,e in rows if r.source_id in current]
+            chunk_ids=[r.id for r,e in compatible if e and e.embedding_model==embedding_model and e.embedding_dim==len(query_embedding)]
+            def load_vectors():
+                return self.db.execute(select(KnowledgeChunkEmbeddingModel.chunk_id,KnowledgeChunkEmbeddingModel.embedding_json).where(
+                    KnowledgeChunkEmbeddingModel.chunk_id.in_(chunk_ids))).yield_per(128)
             with trace_stage('稠密向量相似度计算'):
-                dense = dense_scores(rows, query_embedding, embedding_model, str(self.db.get_bind().url))
+                dense = dense_scores(compatible, query_embedding, embedding_model, str(self.db.get_bind().url),load_vectors=load_vectors)
             trace_note('稠密向量召回', model=embedding_model, compatible_candidates=len(dense), positive_candidates=sum(score > 0 for score in dense.values()))
         score_details = {}
         results: list[KnowledgeChunk] = []

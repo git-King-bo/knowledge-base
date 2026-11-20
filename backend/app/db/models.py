@@ -117,6 +117,7 @@ class KnowledgeBaseSourceModel(Base):
 
 class KnowledgeChunkModel(Base):
     __tablename__ = "knowledge_chunks"
+    __table_args__ = (Index("ix_knowledge_chunks_source_index", "source_id", "chunk_index"),)
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     source_id: Mapped[str] = mapped_column(ForeignKey("knowledge_sources.id"), nullable=False)
@@ -137,6 +138,7 @@ class KnowledgeChunkModel(Base):
 
 class KnowledgeChunkEmbeddingModel(Base):
     __tablename__ = "knowledge_chunk_embeddings"
+    __table_args__ = (Index("ix_chunk_embeddings_model_dimension", "embedding_model", "embedding_dim", "chunk_id"),)
 
     chunk_id: Mapped[str] = mapped_column(ForeignKey("knowledge_chunks.id"), primary_key=True)
     embedding_model: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -290,6 +292,7 @@ class ImportJobModel(Base):
     completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    index_fingerprint: Mapped[str] = mapped_column(String(64),nullable=False,default='',server_default='')
     error: Mapped[str | None] = mapped_column(DocumentText, nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

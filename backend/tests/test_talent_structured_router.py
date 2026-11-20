@@ -36,8 +36,7 @@ class RouterContractTests(unittest.TestCase):
         topic=compile_structured('查找alpha领域人才',[sheet])
         self.assertEqual(topic.search.predicates[0].values,['alpha'])
         combined=compile_structured('查找Northbridge University alpha领域人才',[sheet])
-        self.assertEqual([p.kind for p in combined.search.predicates],['metadata','topic'])
-        self.assertEqual(combined.search.predicates[0].values,['Northbridge University'])
+        self.assertIsNone(combined)  # Compositional meaning belongs to the typed planner.
         current=compile_structured('当前任职Northbridge University的人才',[sheet])
         self.assertEqual(current.search.predicates[0].relation,'current_affiliation')
         for q in ['查找alpha和beta领域人才','查找不含alpha领域人才']:
@@ -93,6 +92,33 @@ class StructuredApiTests(unittest.TestCase):
             self.assertEqual(trace.status,'error')
             self.assertIn('规划模型',trace.error)
 
+    def test_social_turns_return_friendly_answers_without_model_calls(self):
+        base=self.roster()
+        with patch.object(OpenAICompatibleProvider,'chat',side_effect=AssertionError('social turn needs no model')) as model:
+            for endpoint in ('/api/knowledge/ask','/api/knowledge/ask/stream'):
+                for question in ('你好！', '谢谢你', 'hello'):
+                    response=self.client.post(endpoint,json={'question':question,'knowledge_base_id':base})
+                    self.assertEqual(response.status_code,200,response.text)
+                    self.assertIn('查询和统计人才',response.text)
+                    if endpoint.endswith('/stream'):
+                        self.assertIn('event: done',response.text)
+                        self.assertNotIn('event: error',response.text)
+                    else:
+                        self.assertEqual(response.json()['row_sources'],[])
+            model.assert_not_called()
+
+    def test_unrelated_intent_is_friendly_but_invalid_plan_remains_failure(self):
+        base=self.roster()
+        for endpoint in ('/api/knowledge/ask','/api/knowledge/ask/stream'):
+            with patch.object(OpenAICompatibleProvider,'chat',return_value=ChatResult(
+                    content='{"intent":"unsupported","message":"请告诉我你想了解哪方面的人才或资料。"}',usage=TokenUsage())):
+                response=self.client.post(endpoint,json={'question':'给我讲个笑话','knowledge_base_id':base})
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertIn('人才或资料',response.text)
+            with patch.object(OpenAICompatibleProvider,'chat',return_value=ChatResult(content='{}',usage=TokenUsage())):
+                response=self.client.post(endpoint,json={'question':'查找具有跨学科创业潜力的人才','knowledge_base_id':base})
+            self.assertEqual(response.status_code,502,response.text)
+
     def test_missing_fixed_planner_does_not_break_structured_lane(self):
         base=self.roster()
         with patch.object(settings,'talent_planner_provider_id','deleted-provider'), \
@@ -129,11 +155,15 @@ class ActivityTopicRegressionTests(unittest.TestCase):
             {'row':4,'talent_id':'c','fields':{'姓名':'C','领域':'other','当前机构':'Other Lab','所在国家／城市':'英国','OpenAlex h-index':'20'}}])
 
     def test_activity_and_research_wrappers_do_not_become_topic_terms(self):
+        from app.services.talent_structured_router import topic_expression
         for topic in ['AI4S','ai4s','蛋白质设计','arbitrary-Zeta']:
             for question in [f'从事{topic}领域的人才',f'从事{topic}领域研究的人才',f'查找从事{topic}方向研究的人才']:
                 with self.subTest(question=question):
                     plan=compile_structured(question,[self.sheet()])
-                    self.assertEqual(plan.search.predicates[0].values,[topic])
+                    parsed=topic_expression(question,r'(?:查找)?',r'(?:的)?人才')
+                    self.assertEqual(parsed,topic)
+                    if topic.lower()=='ai4s':self.assertEqual(plan.search.predicates[0].values,[topic])
+                    else:self.assertIsNone(plan)  # Unknown terms require semantic interpretation.
         for question in ['从事AI4S和机器人领域的人才','从事AI4S领域但排除美国的人才','从事AI4S领域并且有创业经历的人才','从事AI4S领域并且机器人领域人才']:
             self.assertIsNone(compile_structured(question,[self.sheet()]),question)
 

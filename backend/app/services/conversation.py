@@ -11,11 +11,12 @@ from app.schemas.ai import ChatMessage
 
 class RetrievalClarification(Exception):
     """A normal conversational turn that must finish before any retrieval is run."""
-    def __init__(self, question, provider_id, model):
+    def __init__(self, question, provider_id, model, *, query_state=None):
         super().__init__(question)
         self.question = question
         self.provider_id = provider_id
         self.model = model
+        self.query_state = query_state
 
 
 def bounded_history(history):

@@ -49,6 +49,24 @@ if [ -f "$root/deploy/company-version.env" ]; then
     cp "$root/deploy/compose.company.yaml" "$backup/"
     if [[ "$target" != frontend ]]; then
         "${compose[@]}" stop backend
+        # MySQL rows live outside data/. Export a consistent SQL snapshot into
+        # the persistent volume before archiving files and encryption keys.
+        if ! "${compose[@]}" run --rm --no-deps -e PYTHONPATH=/app -w /data backend python -c '
+from app.db.session import engine, Base
+from app.db import models
+from sqlalchemy import inspect
+from scripts.prepare_mysql import snapshot
+if engine.dialect.name == "mysql":
+    with engine.connect().execution_options(stream_results=True) as connection:
+        connection.exec_driver_sql("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        connection.exec_driver_sql("START TRANSACTION WITH CONSISTENT SNAPSHOT")
+        tables = sorted(set(inspect(connection).get_table_names()) & set(Base.metadata.tables))
+        print("MySQL backup:", snapshot(connection, tables + ["alembic_version"]))
+        connection.rollback()
+'; then
+            "${compose[@]}" start backend
+            exit 1
+        fi
         if ! tar -C "$root" -czf "$backup/data.tgz" data; then
             "${compose[@]}" start backend
             exit 1

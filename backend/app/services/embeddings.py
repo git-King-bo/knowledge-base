@@ -9,6 +9,7 @@ from app.schemas.usage import TokenUsage
 import httpx
 import json
 import hashlib
+import math
 import threading
 from collections import OrderedDict
 from time import monotonic
@@ -20,6 +21,7 @@ from app.core.security import validate_provider_url
 _query_mode = ContextVar('embedding_query_mode', default=False)
 _circuits = OrderedDict()
 _circuit_lock = threading.Lock()
+_query_slots=threading.BoundedSemaphore(2)
 
 
 @dataclass(slots=True)
@@ -90,7 +92,7 @@ class EmbeddingClient:
             AIRepository(self.db).create_activity_log(
                 action="embedding", provider_id="embedding", model=self.config.model,
                 request_text=json.dumps({"model": self.config.model, "input": texts}, ensure_ascii=False) if traced else f"Embedding batch: {len(texts)} texts",
-                response_text=json.dumps({"vectors": vectors}, ensure_ascii=False) if traced and vectors is not None else "",
+                response_text=json.dumps({'count':len(vectors),'dimensions':len(vectors[0]) if vectors else 0}) if vectors is not None else '',
                 success=success, latency_ms=int((perf_counter() - started) * 1000),
                 usage=usage, knowledge_base_id=self.knowledge_base_id,
             )
@@ -118,13 +120,20 @@ class EmbeddingClient:
                 raise RuntimeError(message) from exc
 
         data = response.json()
-        items = sorted(data.get("data") or [], key=lambda item: item.get("index", 0))
+        items=data.get('data') or []
+        indexes=[item.get('index') for item in items]
+        if len(items)!=len(texts) or any(type(i) is not int for i in indexes) or sorted(indexes)!=list(range(len(texts))):
+            raise RuntimeError('Embedding response indexes do not match the input batch')
+        items = sorted(items,key=lambda item:item['index'])
         embeddings: list[list[float]] = []
         for item in items:
             vector = item.get("embedding") or []
             embeddings.append([float(value) for value in vector])
         if len(embeddings) != len(texts):
             raise RuntimeError("Embedding response length mismatch")
+        dimensions={len(v) for v in embeddings}
+        if len(dimensions)!=1 or not next(iter(dimensions),0) or any(not all(math.isfinite(x) for x in v) or sum(x*x for x in v)<=0 for v in embeddings):
+            raise RuntimeError('Embedding response contains invalid vectors')
         if (settings.embedding_dimensions and self.config.model == settings.embedding_model
                 and self.config.api_url == settings.embedding_api_url
                 and any(len(vector) != settings.embedding_dimensions for vector in embeddings)):
@@ -135,7 +144,8 @@ class EmbeddingClient:
         from app.services.query_cache import query_vector_cache
         from app.services.agent_trace import trace_note
         # Key rotation/model changes get an independent circuit. No secrets in logs.
-        identity = hashlib.sha256(json.dumps([self.config.api_url,self.config.model,self.config.api_key]).encode()).digest()
+        revision=settings.embedding_revision if self.config.api_url==settings.embedding_api_url and self.config.model==settings.embedding_model else ''
+        identity = hashlib.sha256(json.dumps([self.config.api_url,self.config.model,self.config.api_key,revision]).encode()).digest()
         key = (identity, hashlib.sha256(text.encode()).digest())
         cached = query_vector_cache.get(key)
         if cached is not None:
@@ -145,17 +155,16 @@ class EmbeddingClient:
             if _circuits.get(identity, 0) > monotonic():
                 trace_note('查询向量熔断', status='fallback', reason='冷却期内直接使用文本检索')
                 raise RuntimeError('Embedding query temporarily unavailable (circuit open)')
-            # One probe per provider per process; concurrent queries degrade immediately.
-            _circuits[identity] = monotonic()+settings.embedding_query_timeout*5
-            _circuits.move_to_end(identity)
-            while len(_circuits)>128:
-                _circuits.popitem(last=False)
+        # An in-flight successful request is not a failed provider. Bound actual
+        # query work without opening a circuit for unrelated concurrent users.
+        if not _query_slots.acquire(blocking=False):
+            raise RuntimeError('Embedding query concurrency limit reached')
         token = _query_mode.set(True)
         try:
             embeddings = self.embed_texts([text])
             vector = embeddings[0] if embeddings else []
             import math
-            if not vector or not all(math.isfinite(v) for v in vector):
+            if not vector or not all(math.isfinite(v) for v in vector) or sum(v*v for v in vector)<=0:
                 raise ValueError('Invalid query embedding')
             query_vector_cache.put(key, vector)
         except Exception as exc:
@@ -164,6 +173,8 @@ class EmbeddingClient:
             cooldown = settings.embedding_denied_cooldown if denied else settings.embedding_failure_cooldown
             with _circuit_lock:
                 _circuits[identity] = monotonic()+cooldown
+                _circuits.move_to_end(identity)
+                while len(_circuits)>128:_circuits.popitem(last=False)
             raise
         else:
             with _circuit_lock:
@@ -171,3 +182,4 @@ class EmbeddingClient:
             return vector
         finally:
             _query_mode.reset(token)
+            _query_slots.release()

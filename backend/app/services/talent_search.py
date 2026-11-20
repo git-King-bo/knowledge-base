@@ -58,6 +58,12 @@ class TalentPlan(BaseModel):
     match_all: bool = Field(default=False, description='只有用户明确要求查看全部人才且没有其他条件时为true')
     context_update: ContextUpdate = Field(default_factory=ContextUpdate, description='本轮对已有条件的显式修改；未提及的条件和排序由程序保留')
     search: SearchSpec | None = Field(default=None, description='普通搜索条件的可执行编译结果；严格核验及旧计划可为空')
+    document_previous_results:bool=False
+    task_explicit:bool=False
+    document_question:str=Field(default='',max_length=5000)
+    pending_question:str=Field(default='',max_length=5000)
+    result_scope:Literal['all_matches','previous_results','previous_page']='all_matches'
+    scope_explicit:bool=False
 
     @model_validator(mode='before')
     @classmethod
@@ -242,6 +248,7 @@ def rule_plan(question: str, sheets: list[TalentSheet]) -> TalentPlan | None:
     if remainder:
         return None
     return TalentPlan(filters=filters, sort_by=sort_by,
+                      task_explicit=True,context_update=ContextUpdate(evidence=question),
                       descending=not bool(re.search(r"升序|从低到高|从小到大|最低", question)),
                       result_limit=min(100, max(1, int(limit_match[1]))) if limit_match else (1 if re.search(r'最高|最低', question) else None),
                       limit=min(100, max(1, int(limit_match[1]))) if limit_match else 20)
@@ -263,6 +270,7 @@ def validate_plan(plan: TalentPlan, sheets: list[TalentSheet]) -> TalentPlan:
         not term.strip() for group in plan.concepts for term in group.terms
     ) or any(not condition.strip() for condition in plan.evidence_conditions):
         raise ValueError('研究概念字段或语义条件无效')
+    if plan.intent=='document':return plan
     if plan.intent == 'aggregate':
         if plan.operation is None:
             raise ValueError('缺少统计操作')
@@ -376,9 +384,12 @@ def parse_model_plan(raw: str, *, sheets=None, question="", previous=None) -> Ta
         raise ValueError('Expected one query plan object')
     if data.get('context_update', {}) is None:
         data = {**data, 'context_update': {}}
-    if 'facets' in data:
-        from app.services.talent_semantics import compile_intent
+    from app.services.talent_semantics import Intent, compile_intent
+    # Facets are optional: counts, sorting and context updates can stand alone.
+    # Explicit legacy plan fields retain their original decoder.
+    if 'facets' in data or (data and set(data).issubset(Intent.model_fields)):
         return compile_intent(data, question, sheets or [], previous)
+    data.setdefault('task_explicit','intent' in data)
     return TalentPlan.model_validate(data)
 
 
@@ -409,6 +420,9 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
         if cached is None:
             return '这批查询结果已过期或资料已更新，请重新执行原查询。'
         if cached.get('search_mode') == 'hybrid':
+            if cached.get('_semantic'):
+                from app.services.talent_semantic_gate import advance
+                return advance(cached,planner,snapshot_scope,question,offset,max_results)
             from app.services.talent_results import result_page
             return result_page(cached, offset, max_results)
         from app.services.talent_execution import resume_search
@@ -426,6 +440,15 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
     if not sheets:
         trace_note('人才路径选择', status='skipped', reason='没有可用人才表，进入知识片段检索')
         return None
+    # Match complete social turns only; greetings prefixed to a real query
+    # and short follow-up conditions must still reach the query planner.
+    social_turn = re.sub(r'[\s，,。.!！?？～~]+', '', question).casefold()
+    if not saved_plan and not snapshot_id and social_turn in {
+        '你好', '您好', '你们好', '嗨', '哈喽', 'hello', 'hi', 'hey',
+        '早上好', '下午好', '晚上好', '谢谢', '谢谢你', '多谢', '再见', '拜拜',
+    }:
+        trace_note('查询未执行', status='skipped', code='social_turn')
+        return '你好！我可以帮你查询和统计人才、筛选机构或研究方向，也可以解读知识库资料。试试问我：“查找人工智能领域的人才”或“人才库一共有多少人？”'
     if getattr(planner, 'fast_search', False) and isinstance(getattr(planner, 'previous_plan', None), dict):
         from app.services.talent_structured_router import repair_legacy_topic
         repaired = repair_legacy_topic(planner.previous_plan, getattr(planner, 'previous_question', None), sheets, question)
@@ -448,15 +471,17 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
     if (not saved_plan and not cached_plan and getattr(planner,'fast_search',False)
             and not getattr(planner,'has_unstructured_history',False)):
         from app.services.talent_structured_router import compile_structured
-        from app.services.talent_semantics import local_geo_intent, compile_intent
-        geo = local_geo_intent(question, getattr(planner,'previous_plan',None))
-        local_plan=compile_intent(geo, question, sheets, getattr(planner,'previous_plan',None)) if geo is not None else compile_structured(question,sheets)
+        from app.services.talent_semantics import local_geo_intent, local_metric_intent,local_name_intent, compile_intent
+        local_intent=local_geo_intent(question,getattr(planner,'previous_plan',None))
+        if local_intent is None:local_intent=local_metric_intent(question,(f for s in sheets for f in s.headers))
+        if local_intent is None:local_intent=local_name_intent(question,sheets)
+        local_plan=compile_intent(local_intent,question,sheets,getattr(planner,'previous_plan',None)) if local_intent is not None else compile_structured(question,sheets)
         if local_plan is not None:
             local_plan = bind_semantics(local_plan, sheets)
             previous=getattr(planner,'previous_plan',None)
             if isinstance(previous,dict) and previous:
                 from app.services.talent_context_update import inherit_plan
-                local_plan=inherit_plan(local_plan,previous,question)
+                local_plan=inherit_plan(local_plan,previous,question,reviewer=getattr(planner,'review_context',None))
             local_plan=validate_plan(local_plan,sheets)
             trace_note('本地结构化编译',route='structured',model_call=False,conditions=local_plan.evidence_conditions,sort_by=local_plan.sort_by)
     plan = validate_plan(saved_plan, sheets) if saved_plan else (
@@ -506,7 +531,7 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
                 conditions=list(dict.fromkeys(plan.evidence_conditions+
                     [p.condition for p in plan.search.predicates if p.condition!=topic]))
                 plan=plan.model_copy(update={'topic_condition':topic,'evidence_conditions':conditions})
-            if plan.intent in {'filter', 'aggregate'}:
+            if plan.intent in {'filter', 'aggregate','document'}:
                 previous=getattr(planner,'previous_plan',None)
                 if isinstance(previous,dict) and previous:
                     from app.services.talent_context_update import inherit_plan
@@ -536,6 +561,47 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
         plan = validate_plan(plan.model_copy(update={'intent':'filter',
             'evidence_conditions':plan.evidence_conditions or [question]}), sheets)
     if plan.intent == 'document':
+        from app.services.talent_fast_search import test_predicate,validate_compiled
+        from app.services.talent_semantic_gate import direct_topic
+        compiled=validate_compiled(plan,sheets)
+        if any(p.kind=='unresolved' for p in compiled.values()):
+            raise ContextChangeUnresolved('所需资料范围包含尚无法执行的条件，请明确筛选依据后再解释资料。',
+                plan=plan.model_copy(update={'pending_question':plan.document_question or question}))
+        metadata=[p for p in compiled.values() if p.kind=='metadata'];topics=[p for p in compiled.values() if p.kind=='topic']
+        from app.services.talent_scope import subject_scope,reused_semantic_keys
+        restricted=subject_scope(plan,planner);verified=reused_semantic_keys(plan,planner)
+        if metadata or topics or plan.filters or restricted is not None:
+            filter_keys=None
+            if plan.filters:
+                scoped=execute_plan(plan.model_copy(update={'intent':'filter','concepts':[]}),sheets,all_records=True,include_unranked=True)
+                filter_keys={(g['source_id'],g['sheet'],r['excel_row']) for g in scoped for r in g.get('records',[])}
+            selected=[(s,r) for s in sheets for r in s.rows
+                if (filter_keys is None or (s.source_id,s.sheet,r['row']) in filter_keys)
+                if all(test_predicate(r['fields'],p) is True for p in metadata)
+                and (restricted is None or (s.source_id,s.sheet,r['row']) in restricted)
+                and ((s.source_id,s.sheet,r['row']) in verified or all(direct_topic(r['fields'],p,question) for p in topics))]
+            people=[r.get('talent_id') for _,r in selected]
+            if not people:raise ContextChangeUnresolved('当前资料中未找到能确定符合这些姓名或机构条件的记录，请核对名称。',
+                plan=plan.model_copy(update={'pending_question':plan.document_question or question}))
+            if any(p is None for p in people):return '这份人员资料尚未建立逐人分块归属，请完成索引后再解释指定人员资料。'
+            if any(p.slot=='person_name' and len(p.values)==1 for p in metadata) and len(people)>1 and not plan.document_previous_results:
+                pending=plan.model_copy(update={'pending_question':plan.document_question or question})
+                raise ContextChangeUnresolved('找到多条同名记录，请补充机构限定，以免把不同人的资料合并。',plan=pending)
+            plan=plan.model_copy(update={'pending_question':''})
+            planner.document_talent_ids=people
+            trace_note('资料解释范围约束',people=len(people),fields=[p.fields for p in metadata])
+            from app.services.talent_results import save_result
+            groups=[]
+            for sheet in sheets:
+                records=[{'excel_row':r['row'],'fields':r['fields']} for s,r in selected if s is sheet]
+                if records:groups.append({'source_id':sheet.source_id,'file':sheet.filename,'sheet':sheet.sheet,'records':records,'matched_records':len(records)})
+            evidence={'search_mode':'hybrid','results':groups,'plan':plan.model_dump(),'matched':len(people),'can_continue':False,
+                'result_order':[[s.source_id,s.sheet,r['row']] for s,r in selected],'coverage':{'complete':True}}
+            if restricted is not None:evidence['_scope_keys']=[list(k) for k in restricted]
+            evidence['_semantic_verified_keys']=[list(k) for k in verified if k in {tuple(v) for v in evidence['result_order']}]
+            planner.document_snapshot_id=save_result(snapshot_scope,question,plan.model_dump(),evidence)
+            planner.document_snapshot_query=question
+        planner.document_plan=plan
         trace_note('人才路径选择', status='skipped', reason='进入语义片段检索或文档问答', intent=plan.intent)
         return None
     if plan.intent in {'clarify', 'unsupported'}:
@@ -546,13 +612,16 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
         previous=getattr(planner,'previous_plan',None)
         trusted=TalentPlan.model_validate(previous).filters if isinstance(previous,dict) and previous else ()
         plan = protect_text_filters(plan, question, sheets, trusted_filters=trusted)
-        if getattr(planner, 'fast_search', False) and plan.intent=='filter':
+        if getattr(planner, 'fast_search', False) and plan.intent in {'filter','aggregate'}:
             from app.services.talent_fast_search import validate_compiled
             validate_compiled(plan,sheets)
     except ValueError:
         return '查询计划包含无法执行的字段或条件，本次未执行查询；这不表示没有相关人才。'
     if plan_key and not saved_plan and not failures:
         plan_cache.put(plan_key,plan.model_dump())
+    if getattr(planner, 'fast_search', False) and plan.intent in {'filter','aggregate'}:
+        from app.services.talent_fast_search import search_talents
+        return search_talents(question, plan, sheets, failures, planner, snapshot_scope, offset, max_results)
     if plan.intent == 'aggregate' and not plan.evidence_conditions:
         from collections import Counter
         with trace_stage('全表聚合统计'):
@@ -577,8 +646,5 @@ def talent_context(question: str, sources, planner=None, *, max_results: int = 5
             trace_note('全表统计结果', **aggregate)
             return json.dumps({'aggregate': aggregate, 'results': [], 'plan': plan.model_dump()}, ensure_ascii=False)
     from app.services.talent_execution import start_search
-    if getattr(planner, 'fast_search', False) and plan.intent == 'filter':
-        from app.services.talent_fast_search import search_talents
-        return search_talents(question, plan, sheets, failures, planner, snapshot_scope, offset, max_results)
     return start_search(question, plan, sheets, failures, planner, hybrid_search,
                         snapshot_scope, offset, max_results)

@@ -6,7 +6,8 @@ from app.services.talent_search import TalentPlan, ContextUpdate
 
 
 class ContextChangeUnresolved(ValueError):
-    pass
+    def __init__(self,message,*,plan=None):
+        super().__init__(message);self.plan=plan
 
 
 class ContextReview(BaseModel):
@@ -22,6 +23,7 @@ def review_instructions():
         'before和after分别是合并前、后的完整语义状态；conditions为必须满足的条件集合，sort为排序，result_limit为用户要求的总量上限。'
         '这些状态已去除内部字段和重复条件，只比较before到after的实际变化，不根据requested_changes中的省略或索引猜测丢失了条件。'
         '逐项比较实际变更，包括地域、主题、角色、排序及人数上限：只允许本轮明确涉及的变化，其他条件应保留。'
+        '还需比较task中的任务种类、统计操作及字段；只改国家或补充机构不代表把统计改为名单，或放弃待回答的解释任务。'
         '重置后也不能带入本轮未要求的旧排序或旧人数上限。'
         '新增条件不意味着移除旧条件，新增主题和替换主题不同，完整句式也不意味着全库重新开始。'
         '结合上下文理解任意措辞或语言，不要求出现特定动词；引用原话只是溯源，不能替代语义判断。'
@@ -32,10 +34,17 @@ def review_instructions():
 
 def inherit_plan(current, previous, question, *, reviewer=None):
     previous=TalentPlan.model_validate(previous)
+    if not current.task_explicit and current.intent=='filter' and previous.intent in ('aggregate','document'):
+        current=current.model_copy(update={'intent':previous.intent,'operation':previous.operation,'field':previous.field,
+            'document_question':current.document_question or previous.pending_question or previous.document_question,
+            'pending_question':previous.pending_question})
+    if not current.scope_explicit and not current.task_explicit:
+        current=current.model_copy(update={'result_scope':previous.result_scope})
     change=current.context_update
+    changes_task=current.task_explicit and (current.intent,current.operation,current.field)!=(previous.intent,previous.operation,previous.field)
     replaces_topic=bool(previous.topic_condition and current.topic_condition and
                         previous.topic_condition!=current.topic_condition and change.topic_action=='replace')
-    changed=change.reset or change.remove_conditions or change.remove_filters or change.clear_sort or change.clear_limit or change.clear_topic or replaces_topic
+    changed=change.reset or change.remove_conditions or change.remove_filters or change.clear_sort or change.clear_limit or change.clear_topic or replaces_topic or changes_task or (current.scope_explicit and current.result_scope!=previous.result_scope)
     if changed and (not change.evidence.strip() or change.evidence not in question):
         raise ContextChangeUnresolved('本次条件变更缺少当前问题的依据，请明确要调整哪些已有条件。')
     if any(i<0 or i>=len(previous.evidence_conditions) for i in change.remove_conditions):
@@ -67,10 +76,10 @@ def _compile_change(current,previous,question,changed):
         return current.model_copy(update={'sort_by':current.sort_by if 'sort_by' in change.assignments else None,
             'result_limit':current.result_limit if 'result_limit' in change.assignments else None,
             'context_update':ContextUpdate()})
-    topic='' if change.clear_topic else (current.topic_condition or previous.topic_condition)
+    removed_topic=any(previous.evidence_conditions[i]==previous.topic_condition for i in change.remove_conditions)
+    topic=current.topic_condition or ('' if change.clear_topic or removed_topic else previous.topic_condition)
     old_conditions=[c for i,c in enumerate(previous.evidence_conditions)
                     if i not in change.remove_conditions and c!=previous.topic_condition]
-    removed_topic=any(previous.evidence_conditions[i]==previous.topic_condition for i in change.remove_conditions)
     if (previous.topic_condition and current.topic_condition and change.topic_action=='add'
             and not change.clear_topic and not removed_topic):
         old_conditions.append(previous.topic_condition)
@@ -81,7 +90,7 @@ def _compile_change(current,previous,question,changed):
     sorting=None if change.clear_sort else (current.sort_by or previous.sort_by)
     descending=current.descending if current.sort_by else previous.descending
     limit=None if change.clear_limit else (current.result_limit if current.result_limit is not None else previous.result_limit)
-    concepts=current.concepts if current.concepts or current.topic_condition else previous.concepts
+    concepts=current.concepts if current.concepts or current.topic_condition else ([] if change.clear_topic or removed_topic else previous.concepts)
     if not conditions and not topic:
         concepts=[]
     if current.intent=='aggregate':
@@ -102,6 +111,8 @@ def _compile_change(current,previous,question,changed):
 def semantic_state(plan):
     """Present user-visible predicates once, without pagination or compiler metadata."""
     return {'conditions':list(dict.fromkeys(plan.evidence_conditions+([plan.topic_condition] if plan.topic_condition else []))),
+            'task':{'intent':plan.intent,'operation':plan.operation,'field':plan.field},
+            'result_scope':plan.result_scope,
             'filters':[f.model_dump() for f in plan.filters],
             'sort':{'field':plan.sort_by,'descending':plan.descending} if plan.sort_by else None,
             'result_limit':plan.result_limit}

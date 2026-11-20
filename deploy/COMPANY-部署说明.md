@@ -2,10 +2,10 @@
 
 入口：http://future.ops.originhub.tech 。服务器 `companyOps`（139.196.251.24），目录 `/opt/knowledge-base`。
 
-线上使用独立 SQLite：`/opt/knowledge-base/data/knowledge_base.db`，不直接连接本地 MySQL。
-2026-11-16 已从本地实际 MySQL `wangbo_pro` 的一致性快照迁移：4 个知识库、12 份原件、1,923 条人才记录、60 个会话、7,535 个分片、7,525 条向量和 5 个模型服务配置；相应加密密钥仅保存在服务器数据目录。
-这是一次性迁移，不是 MySQL/SQLite 自动双向同步，之后两边新增数据彼此独立。
-迁移前线上空库与配置备份位于 `/opt/knowledge-base/backups/pre-data-sync-20261116T060654Z/`。
+部署配置强制使用 MySQL，连接凭据保存在服务器 `deploy/mysql.env`（0600，参考 `mysql.env.example`），连接失败不回退 SQLite。
+统一数据以原线上 SQLite 为权威来源：“人才检索”知识库 14,884 个切片；整套数据包含 4 个知识库、12 份资料、1,923 条人才、31,908 个切片和 31,898 条向量。
+上传资料和加密密钥继续保存在服务器 `data/`。本地页面使用 `pnpm dev:online` 直接连接同一后端；不要另起共享 MySQL 的导入 worker，或把另一台机器的文件路径写入共享库。
+切换前的 SQLite、原件、安全配置和 MySQL SQL 快照保存在服务器 `backups/mysql-cutover-*` 及 `data/storage/backups/`；均属于私有备份。
 宿主机 Nginx 继续提供原 `future_ops.originhub.tech` 服务；新域名单独代理到
 `127.0.0.1:18080`，由 Docker 内的 Caddy 提供前端并代理 FastAPI。
 
@@ -59,10 +59,10 @@ curl --fail http://future.ops.originhub.tech/ready
 ```
 
 更新 company.env 后，用同一 compose 命令的 `up -d` 重建容器。镜像不自动清理。
-数据库、原件、加密密钥都在 `data/`，目录归容器用户 10001 所有。
+数据库位于远程 MySQL；原件、加密密钥位于 `data/`，目录归容器用户 10001 所有。
 容器配置了自动重启，Docker 已启用开机启动；日志按 10 MB × 3 轮转。
 
-后端或全量发布在停止后端写入后将完整 data 打包到 `backups/UTC时间/data.tgz`，包含密钥，应按敏感数据保管。
+后端或全量发布在停止后端写入后，先导出一致性 MySQL SQL 快照到 `data/storage/backups/`，再将完整 data 打包到 `backups/UTC时间/data.tgz`，包含密钥，应按敏感数据保管。
 发布失败会尝试恢复上一版 compose、镜像和 Nginx 配置；数据库不自动降级。
 若新版本改变数据库结构，旧镜像可能不能直接运行，应在维护窗口用匹配的备份恢复，并考虑恢复后新增数据。
 目前没有自动异地备份，也没有自动执行旧版 MySQL 发布控制器。

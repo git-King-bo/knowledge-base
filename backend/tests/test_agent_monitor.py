@@ -113,7 +113,7 @@ class AgentMonitorTests(unittest.TestCase):
         self.assertAlmostEqual(scores[0]['embedding_score'], 1.0)
         call = next(call for call in detail['calls'] if call['action'] == 'embedding')
         self.assertEqual(json.loads(call['request_text'])['input'], ['产品发布流程'])
-        self.assertEqual(json.loads(call['response_text'])['vectors'], [[1.0, 0.0]])
+        self.assertEqual(json.loads(call['response_text']),{'count':1,'dimensions':2})
 
     def test_stream_trace_header_and_browser_events_roundtrip(self):
         base = self.base(); self.upload(base)

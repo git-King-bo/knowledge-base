@@ -1,5 +1,6 @@
 """Single-process inference concurrency and persistent per-user daily budgets."""
 import asyncio
+from contextlib import contextmanager
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -23,6 +24,22 @@ def ensure_budget(db, user_id, day):
 
 _active=0
 MAX_MODEL_CALLS_PER_OPERATION = 4
+
+@contextmanager
+def semantic_page_calls(batches):
+    """Allow one dispatch per finite candidate batch; retain daily token checks."""
+    counter=usage_counter.get()
+    if counter is None:
+        yield
+        return
+    previous=counter.get('model_call_limit')
+    counter['model_call_limit']=max(previous or MAX_MODEL_CALLS_PER_OPERATION,
+                                    counter.get('dispatched',0)+batches)
+    try:
+        yield
+    finally:
+        if previous is None:counter.pop('model_call_limit',None)
+        else:counter['model_call_limit']=previous
 
 async def inference_budget(request:Request,db:Session=Depends(get_db),user=Depends(authenticate)):
     global _active
@@ -89,7 +106,7 @@ def claim_model_input(messages):
     if characters>60000:raise ValueError('上下文超过60000字符，请缩小范围')
     if counter is not None:
         dispatched=counter.get('dispatched',0)
-        if dispatched>=MAX_MODEL_CALLS_PER_OPERATION:raise ValueError('单次操作模型调用次数已达上限，请缩小查询范围')
+        if dispatched>=counter.get('model_call_limit',MAX_MODEL_CALLS_PER_OPERATION):raise ValueError('单次操作模型调用次数已达上限，请缩小查询范围')
         estimate=sum(len(m.content.encode('utf-8'))+32 for m in messages)+settings.model_max_output_tokens
         claim_token_reservation(estimate)
         counter['dispatched']=dispatched+1
