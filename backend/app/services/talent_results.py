@@ -58,6 +58,8 @@ def result_scope(db,base_id,sources):
 
 def result_page(evidence,offset,limit):
     from app.services.agent_trace import trace_note
+    for key in list(evidence):
+        if key.startswith('_'):evidence.pop(key)
     order=evidence['result_order']
     selected_order=order[offset:offset+limit]
     selected={tuple(key) for key in selected_order}
@@ -104,11 +106,16 @@ def sort_result(evidence,field,descending,scope,question,limit):
     else:
         missing.sort(key=lambda item:previous_positions.get(tuple(item[1]),len(previous_positions)))
     evidence['result_order']=[key for _,key in ranked+missing]
+    total_limit=evidence.get('plan',{}).get('result_limit')
+    if total_limit is not None:evidence['result_order']=evidence['result_order'][:total_limit]
+    selected={tuple(key) for key in evidence['result_order']}
+    rankable=sum(tuple(key) in selected for _,key in ranked)
+    evidence.update(matched=len(selected),rankable=rankable,missing=len(selected)-rankable,unranked=bool(selected and not rankable))
     positions={tuple(key):i for i,key in enumerate(evidence['result_order'])}
     for group in evidence['results']:
         for row in group.get('records', []):
             row['_search_order']=positions.get((group['source_id'],group['sheet'],row['excel_row']),len(positions))
-    evidence['can_continue']=False
-    evidence['plan'].update(sort_by=field,descending=descending,limit=limit)
+    evidence['can_continue']=bool(evidence.get('_semantic',{}).get('pending')) and (total_limit is None or len(selected)<total_limit)
+    evidence['plan'].update(intent='filter',sort_by=field,descending=descending,limit=limit)
     evidence['snapshot_id']=save_result(scope,question,evidence['plan'],evidence)
     return result_page(evidence,0,limit)

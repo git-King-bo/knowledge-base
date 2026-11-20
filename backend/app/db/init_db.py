@@ -43,6 +43,10 @@ def init_db() -> None:
             upgrade_trace_counters(connection)
             from app.db.mysql_schema import widen_mysql_text
             widen_mysql_text(connection)
+            from app.db.index_schema import upgrade_index_jobs
+            upgrade_index_jobs(connection)
+            from app.db.retrieval_schema import upgrade_retrieval_indexes
+            upgrade_retrieval_indexes(connection)
         # create_all does not add columns to an existing local database.
         from sqlalchemy import inspect, text
         if 'enable_thinking' not in {c['name'] for c in inspect(engine).get_columns('ai_providers')}:

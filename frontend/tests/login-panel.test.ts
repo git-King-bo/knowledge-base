@@ -75,19 +75,15 @@ test('pending login cannot be submitted twice, failed login can be corrected and
   } finally { f.dispose(); globalThis.fetch = originalFetch; currentUser.value = undefined }
 })
 
-test('orbit runs, pauses, resumes and releases all animation work on unmount', async () => {
+test('orbit follows system motion preferences and releases animation work on unmount', async () => {
   const before = frames.size, f = mount({ canvas: true })
   try {
     await flush(); assert.equal(frames.size, before + 1)
     const initial = f.draws(); advance(100); advance(116)
     assert.ok(f.draws() > initial)
-    const toggle = f.host.querySelector<HTMLButtonElement>('.motion-toggle')!
-    toggle.click(); await flush()
-    assert.equal(toggle.getAttribute('aria-pressed'), 'true'); assert.equal(frames.size, before)
-    const pausedDraws = f.draws(); advance(1000); assert.equal(f.draws(), pausedDraws)
-    toggle.click(); await flush(); assert.equal(frames.size, before + 1)
     f.setReduced(true); await flush()
-    assert.equal(frames.size, before); assert.equal(toggle.disabled, true)
+    assert.equal(frames.size, before)
+    const pausedDraws = f.draws(); advance(1000); assert.equal(f.draws(), pausedDraws)
     assert.ok(f.host.querySelector('.login-submit')); assert.equal(f.listenerCount(), 1)
     f.setReduced(false); await flush(); assert.equal(frames.size, before + 1)
   } finally { f.dispose() }
@@ -99,7 +95,6 @@ test('reduced-motion initial load stays still, hidden tabs stop rendering and re
   const f = mount({ canvas: true, reduced: true })
   try {
     await flush(); assert.equal(frames.size, before)
-    assert.equal(f.host.querySelector<HTMLButtonElement>('.motion-toggle')!.disabled, true)
     f.setReduced(false); await flush(); assert.equal(frames.size, before + 1)
     Object.defineProperty(document, 'hidden', { configurable: true, value: true })
     document.dispatchEvent(new Event('visibilitychange')); assert.equal(frames.size, before)

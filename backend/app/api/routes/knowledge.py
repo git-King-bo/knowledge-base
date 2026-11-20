@@ -43,6 +43,21 @@ from app.services.conversation import bounded_history, history_messages, resolve
 
 router = APIRouter()
 
+from typing import NamedTuple,Any
+from app.schemas.knowledge import TalentQueryState
+
+
+class PreparedKnowledgeContext(NamedTuple):
+    provider:Any
+    api_key:Any
+    ranked:Any
+    web_sources:Any
+    prompt:str
+    messages:Any
+    row_sources:Any
+    retrieval_query:str
+    query_state:TalentQueryState | None=None
+
 
 def _require_active_base(repo: KnowledgeIngestionRepository, base_id: str | None):
     if not base_id:
@@ -331,6 +346,9 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
             from app.services.talent_evidence import verification_instructions
             instructions = verification_instructions(len(schema['conditions']))
             schema = {**schema, 'candidates': [{'id':item['id'],'passages':item['passages']} for item in schema['candidates']]}
+        elif schema.get('phase')=='semantic_candidates':
+            from app.services.talent_semantic_gate import instructions as semantic_instructions
+            instructions=semantic_instructions()
         elif schema.get('phase') == 'review_context_update':
             from app.services.talent_context_update import review_instructions
             instructions = review_instructions()
@@ -343,8 +361,9 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
         compact = fast and not schema.get('phase')
         if compact:
             request_data['schema']={'available_slots':{k:bool(v) for k,v in schema.get('semantic_slots',{}).items()},
-                                    'metrics':schema.get('semantic_slots',{}).get('metric',[])}
-        if request_context and schema.get('phase') not in {'verify_candidates','review_context_update'}:
+                                    'metrics':schema.get('semantic_slots',{}).get('metric',[]),
+                                    'aggregate_fields':[f for f in schema.get('fields',[]) if not f.startswith('@')]}
+        if request_context and schema.get('phase') not in {'verify_candidates','review_context_update','semantic_candidates'}:
             request_data['request_context']=dict(request_context)
             if compact and request_context.get('previous_plan'):
                 from app.services.talent_semantics import previous_intent
@@ -358,14 +377,16 @@ def _talent_query_planner(db, question, provider, api_key, model, knowledge_base
         try:
             if configuration_error:
                 raise RuntimeError(configuration_error)
-            from app.ai.base import json_max_output_tokens, json_output_requested
+            from app.ai.base import json_max_output_tokens, json_output_requested,json_request_timeout
             token = json_output_requested.set(True)
             limit_token = json_max_output_tokens.set(
-                settings.structured_model_max_output_tokens if fast and not schema.get('phase') else None)
+                256 if schema.get('phase')=='semantic_candidates' else settings.structured_model_max_output_tokens if fast and not schema.get('phase') else None)
+            timeout_token=json_request_timeout.set(settings.talent_semantic_timeout if schema.get('phase')=='semantic_candidates' else None)
             try:
                 result = ai_provider_registry.resolve(provider.provider).chat(provider, messages, model or provider.default_model, api_key)
             finally:
                 json_max_output_tokens.reset(limit_token)
+                json_request_timeout.reset(timeout_token)
                 json_output_requested.reset(token)
             return result.content
         except Exception as exc:
@@ -461,6 +482,7 @@ def search_knowledge(
         query_embedding=query_embedding,
         embedding_model=settings.embedding_model if query_embedding else None,
         knowledge_base_id=knowledge_base_id,
+        talent_ids=getattr(planner,'document_talent_ids',None),
     )
     talent_results = evidence.get('results', [])
     return KnowledgeSearchResult(query=q, hits=ranked, talent_results=talent_results,
@@ -539,7 +561,12 @@ def _prepare_ask(payload: AskRequest, db: Session):
                          'previous_plan':history[-1].query_state.plan if history and history[-1].query_state else None},
         fast_search=fast_search,configuration_error=planner_error)
     plan_talent_query.requires_context = bool(getattr(plan_talent_query,'previous_plan',None))
+    plan_talent_query.previous_result_keys={tuple(key) for key in previous_result.get('result_order',[])} if previous_result else set()
+    plan_talent_query.previous_snapshot=previous_result
+    plan_talent_query.previous_page_keys=(previous_result.get('result_order',[])[previous_state.offset:previous_state.offset+previous_state.returned]
+        if previous_result and previous_state else None)
     from app.services.talent_hybrid import hybrid_talents
+    from app.services.talent_context_update import ContextChangeUnresolved
     try:
         with trace_stage('人才结构化检索'):
             structured_talents = sort_result(previous_result,result_action['field'],result_action['descending'],
@@ -553,12 +580,16 @@ def _prepare_ask(payload: AskRequest, db: Session):
     except TalentQueryFailure as exc:
         trace_note('检索执行失败',status='error',code=exc.code)
         raise HTTPException(status_code=503 if exc.code=='planner_unavailable' else 502,detail=str(exc)) from exc
+    except ContextChangeUnresolved as exc:
+        state=TalentQueryState(knowledge_base_id=payload.knowledge_base_id,query=payload.question,plan=exc.plan.model_dump(),
+            page_size=payload.talent_page_size,returned=0,has_more=False) if exc.plan else previous_state
+        raise RetrievalClarification(str(exc),provider.id,payload.model or provider.default_model,query_state=state) from exc
     except ValueError:
         raise RetrievalClarification('人才表的字段已变化，请重新输入筛选条件后查询。', provider.id, payload.model or provider.default_model)
     if page_state and not structured_talents:
         raise RetrievalClarification('当前知识库中已找不到上一轮的人才表，请重新选择资料后查询。', provider.id, payload.model or provider.default_model)
     if structured_talents and not structured_talents.startswith('{'):
-        raise RetrievalClarification(structured_talents, provider.id, payload.model or provider.default_model)
+        raise RetrievalClarification(structured_talents, provider.id, payload.model or provider.default_model,query_state=previous_state)
     trace_note('人才检索完成', matched=bool(structured_talents))
     row_sources = []
     if structured_talents and structured_talents.startswith('{'):
@@ -579,9 +610,13 @@ def _prepare_ask(payload: AskRequest, db: Session):
             trace_note(step, status='skipped', reason='人才结构化路径直接基于全表筛选和分页结果输出，不执行此环节')
         trace_note('结构化结果生成', records=len(row_sources), model_call=False, query_state=response.query_state.model_dump() if response.query_state else None)
         raise PreparedTalentAnswer(response)
-    if combined_planning:
+    if combined_planning and not getattr(plan_talent_query,'document_talent_ids',None):
         # Document questions still need a standalone query for chunk retrieval.
         retrieval_query = resolve_retrieval_query(payload, history, provider, api_key, db)
+    elif getattr(plan_talent_query,'document_talent_ids',None):
+        document_plan=plan_talent_query.document_plan
+        subjects='；'.join(p.condition for p in (document_plan.search.predicates if document_plan.search else []))
+        retrieval_query=((document_plan.document_question or payload.question)+'；'+subjects)[:5000]
     table_context_lines = []
     if payload.web_search_mode != "web" and needs_spreadsheet_stats(retrieval_query):
         for source in ingestion_repo.list_active_spreadsheet_sources(payload.knowledge_base_id):
@@ -627,6 +662,7 @@ def _prepare_ask(payload: AskRequest, db: Session):
                 query_embedding=query_embedding,
                 embedding_model=settings.embedding_model if query_embedding else None,
                 knowledge_base_id=payload.knowledge_base_id,
+                talent_ids=getattr(plan_talent_query,'document_talent_ids',None),
             )
         web_sources = []
         if not table_context_lines and not structured_talents and _should_run_web_search(payload, ranked):
@@ -664,7 +700,7 @@ def _prepare_ask(payload: AskRequest, db: Session):
         )
 
     prompt = (
-        "你是一个知识库助手。请只基于给定知识回答问题，并尽量引用来源片段。"
+        "你是一个知识库助手。请只基于给定知识回答问题，每项事实须引用能支持它的来源片段；缺乏依据时明确说明，不凭常识补全。"
         "引用知识库资料时使用本次引用编号，例如（Chunk 1），不要使用 Source 编号。"
         "先直接陈述事实或结论，将引用放在相关句子末尾；不要以 Chunk 编号开头逐段罗列资料。"
         "引用外部网页资料时使用网页编号，例如（Web 1）。"
@@ -677,6 +713,8 @@ def _prepare_ask(payload: AskRequest, db: Session):
         "没有姓名表头时，非空行数不能直接当作人数；缺乏统计证据时明确无法确认。"
         "文件名中的数字不是统计证据。\n\n"
         f"问题：{payload.question}\n\n"
+        f"当前待回答任务：{getattr(getattr(plan_talent_query,'document_plan',None),'document_question','') or payload.question}\n"
+        '程序已确认的当前筛选范围优先于历史表述；不要把人才所在地重新解释为机构国别。\n\n'
         f"结合会话理解的检索问题：{retrieval_query}\n\n"
         f"人才结构化查询结果（完整表格执行）：\n{structured_talents or '无'}\n\n"
         f"完整工作簿统计（独立于检索片段）：\n{chr(10).join(table_context_lines) if table_context_lines else '无'}\n\n"
@@ -704,13 +742,17 @@ def _prepare_ask(payload: AskRequest, db: Session):
         ])
         prompt += "\n\n已生成回答：\n" + payload.continuation.answer + "\n\n继续生成。"
     trace_note('组装模型上下文', retrieval_query=retrieval_query, messages=len(messages), characters=sum(len(m.content) for m in messages))
-    return provider, api_key, ranked, web_sources, prompt, messages, row_sources, retrieval_query
+    document_plan=getattr(plan_talent_query,'document_plan',None)
+    query_state=TalentQueryState(knowledge_base_id=payload.knowledge_base_id,query=getattr(plan_talent_query,'document_snapshot_query',retrieval_query),plan=document_plan.model_dump(),
+        snapshot_id=getattr(plan_talent_query,'document_snapshot_id',None),page_size=payload.talent_page_size,returned=0,has_more=False) if document_plan else None
+    return PreparedKnowledgeContext(provider,api_key,ranked,web_sources,prompt,messages,row_sources,retrieval_query,query_state)
 
 
 @router.post("/ask", response_model=AskResponse, dependencies=[Depends(capture_trace)])
 def ask_knowledge(payload: AskRequest, db: Session = Depends(get_db)) -> AskResponse:
     try:
-        provider, api_key, ranked, web_sources, prompt, messages, row_sources, retrieval_query = _prepare_ask(payload, db)
+        prepared_context=_prepare_ask(payload,db)
+        provider, api_key, ranked, web_sources, prompt, messages, row_sources, retrieval_query = prepared_context[:8]
     except PreparedTalentAnswer as prepared:
         trace_output(prepared.response.answer, status='success')
         return prepared.response
@@ -718,7 +760,7 @@ def ask_knowledge(payload: AskRequest, db: Session = Depends(get_db)) -> AskResp
         trace_note('需要澄清')
         trace_output(clarification.question, status='success')
         return AskResponse(answer=clarification.question, provider_id=clarification.provider_id,
-            model=clarification.model, sources=[], retrieval_query=payload.question)
+            model=clarification.model, sources=[], retrieval_query=payload.question,query_state=clarification.query_state)
     ai_repo = AIRepository(db)
     started_at = perf_counter()
     adapter = ai_provider_registry.resolve(provider.provider)
@@ -762,6 +804,7 @@ def ask_knowledge(payload: AskRequest, db: Session = Depends(get_db)) -> AskResp
         web_sources=web_sources,
         row_sources=row_sources,
         retrieval_query=retrieval_query,
+        query_state=getattr(prepared_context,'query_state',None),
     )
 
 
@@ -769,7 +812,8 @@ def ask_knowledge(payload: AskRequest, db: Session = Depends(get_db)) -> AskResp
 async def stream_knowledge(payload: AskRequest, request: Request, db: Session = Depends(get_db)):
     # Retrieval runs off the event loop; validation errors retain their HTTP status.
     try:
-        provider, api_key, ranked, web_sources, prompt, messages, row_sources, retrieval_query = await run_in_threadpool(_prepare_ask, payload, db)
+        prepared_context=await run_in_threadpool(_prepare_ask,payload,db)
+        provider, api_key, ranked, web_sources, prompt, messages, row_sources, retrieval_query = prepared_context[:8]
     except PreparedTalentAnswer as prepared:
         data = prepared.response.model_dump(mode='json')
         answer = data.pop('answer')
@@ -783,7 +827,8 @@ async def stream_knowledge(payload: AskRequest, request: Request, db: Session = 
         def clarification_events():
             for name, data in [
                 ('meta', {'provider_id': clarification.provider_id, 'model': clarification.model,
-                          'retrieval_query': payload.question, 'sources': [], 'row_sources': [], 'web_sources': []}),
+                          'retrieval_query': payload.question, 'sources': [], 'row_sources': [], 'web_sources': [],
+                          'query_state':clarification.query_state.model_dump(mode='json') if clarification.query_state else None}),
                 ('delta', {'text': clarification.question}),
                 ('done', {'usage': TokenUsage().model_dump()}),
             ]:
@@ -810,6 +855,7 @@ async def stream_knowledge(payload: AskRequest, request: Request, db: Session = 
         try:
             yield event("meta", {"provider_id": provider.id, "model": selected_model,
                 "retrieval_query": retrieval_query,
+                'query_state':getattr(prepared_context,'query_state',None).model_dump(mode='json') if getattr(prepared_context,'query_state',None) else None,
                 "sources": [source.model_dump(mode="json") for source in ranked],
                 "row_sources": [source.model_dump(mode="json") for source in row_sources],
                 "web_sources": [source.model_dump(mode="json") for source in web_sources]})

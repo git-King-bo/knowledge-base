@@ -3,12 +3,13 @@ services:
     image: knowledge-company-backend:${KB_BACKEND_VERSION:-${KB_VERSION:?KB_VERSION required}}
     env_file:
       - company.env
+      - mysql.env
       - path: models.env
         required: false
     environment:
       APP_ENV: production
       APP_AUTH_ENABLED: "true"
-      APP_DATABASE_MODE: sqlite
+      APP_DATABASE_MODE: mysql
       DATABASE_URL: sqlite:////data/knowledge_base.db
       APP_SECURITY_DIR: /data/security
       APP_UPLOAD_DIR: /data/uploads

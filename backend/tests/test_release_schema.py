@@ -6,7 +6,7 @@ from app.db.init_db import init_db
 
 class ReleaseSchemaTests(unittest.TestCase):
     def test_matching_schema_checks_without_migrating(self):
-        self.check_schema('0007_mysql_text', succeeds=True)
+        self.check_schema('0009_retrieval_indexes', succeeds=True)
 
     def test_different_schema_blocks_without_migrating(self):
         self.check_schema('0006_agent_traces', succeeds=False)

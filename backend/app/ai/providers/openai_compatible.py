@@ -24,8 +24,8 @@ class OpenAICompatibleProvider(AIProvider):
 
     def _client(self, config: ProviderConfig) -> httpx.Client:
         validate_provider_url(config.base_url, resolve=True)
-        from app.ai.base import json_output_requested
-        timeout = settings.structured_model_timeout if json_output_requested.get() else 60.0
+        from app.ai.base import json_output_requested,json_request_timeout
+        timeout = json_request_timeout.get() or (settings.structured_model_timeout if json_output_requested.get() else 60.0)
         return httpx.Client(base_url=config.base_url.rstrip("/"), timeout=httpx.Timeout(timeout, connect=min(5.0,timeout)), trust_env=False)
 
     def test(self, config: ProviderConfig, api_key: str | None = None) -> ProviderTestResult:

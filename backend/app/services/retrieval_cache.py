@@ -71,15 +71,20 @@ def dense_scores(rows,query,model,database_key,*,load_vectors=None,cache_dir=Non
         # Read large vector bodies only after checking lightweight index metadata.
         loaded = load_vectors() if load_vectors is not None else None
         ids=[];vectors=[]
-        for record,embedding in rows:
-            if embedding and embedding.embedding_model==model:
-                raw = loaded.get(record.id) if loaded is not None else embedding.embedding_json
-                if raw is None:
-                    continue
-                vector=json.loads(raw)
-                if len(vector)==len(query) and all(np.isfinite(vector)):
-                    ids.append(record.id);vectors.append(vector)
-        matrix=np.asarray(vectors,dtype=np.float32)
+        allowed={r.id for r,e in rows if e and e.embedding_model==model and e.embedding_dim==len(query)}
+        stream=loaded.items() if isinstance(loaded,dict) else loaded if loaded is not None else (
+            (r.id,e.embedding_json) for r,e in rows if r.id in allowed)
+        from app.core.config import settings
+        for chunk_id,raw in stream:
+            if chunk_id not in allowed or raw is None:continue
+            try:vector=np.asarray(json.loads(raw),dtype=np.float32)
+            except (ValueError,TypeError):continue
+            if vector.ndim==1 and len(vector)==len(query) and np.isfinite(vector).all() and np.linalg.norm(vector)>0:
+                if len(ids)>=settings.talent_index_max_vectors:
+                    trace_note('向量容量保护',status='fallback',reason='当前范围超过本机向量矩阵容量，保留词项检索')
+                    return {}
+                ids.append(chunk_id);vectors.append(vector)
+        matrix=np.stack(vectors) if vectors else np.empty((0,len(query)),dtype=np.float32)
         if vectors:
             norms=np.linalg.norm(matrix,axis=1,keepdims=True)
             matrix=matrix/np.maximum(norms,1e-12)

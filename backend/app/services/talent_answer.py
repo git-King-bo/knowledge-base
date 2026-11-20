@@ -19,6 +19,7 @@ def next_page_state(payload, history):
     state = history[-1].query_state
     if state is None or state.knowledge_base_id != payload.knowledge_base_id:
         return None
+    if state.plan.get('intent')=='document':return None
     # The client supplies conversation state, never evidence or authorization.
     # Plans are validated against current accessible sources and re-executed.
     TalentPlan.model_validate(state.plan)
@@ -115,10 +116,17 @@ def render_search_answer(evidence, rows):
     """Do not present relevance ranking as an exhaustive or model-verified result."""
     unresolved=evidence.get('unresolved_conditions',[])
     total=evidence['matched']; page=evidence['pagination']; plan=evidence['plan']
-    parts=[f"本次检索返回 {total} 条{'待核验候选' if unresolved else '相关人才记录'}。" if total else
-           '本次未召回符合当前筛选范围的相关记录，不代表资料中不存在相关人才。']
+    parts=[f"本次返回 {page['returned']} 条{'待核验候选' if unresolved else '相关人才记录'}，累计确认 {total} 条。" if total else
+           '本次检索未找到符合当前筛选条件的人才记录。']
     if unresolved:
         parts=['本次条件缺少可核验的数据或执行方式，尚未执行完整筛选；这不是没有匹配人才。']
+    semantic=evidence.get('semantic_status',{})
+    if not total and semantic.get('unknown'):
+        parts=['本次已召回候选，但部分语义证据尚未确认，暂不能给出符合全部条件的名单。']
+    elif not total and semantic.get('pending'):
+        parts=['本次尚未确认匹配人才，仍有候选待核验。']
+    if semantic.get('unavailable'):
+        parts.append('语义核验服务暂时不可用，本次核验未完成，请稍后重试。')
     conditions=list(dict.fromkeys(plan.get('evidence_conditions',[])))
     if conditions:
         parts.append('当前筛选条件：'+'；'.join(cell(c) for c in conditions)+'。')
@@ -132,7 +140,9 @@ def render_search_answer(evidence, rows):
         parts.append('排序仅覆盖当前召回结果，不代表全库精确排名。')
     unknown=evidence.get('coverage',{}).get('unknown',0)
     if unknown:
-        parts.append(f'{unknown} 条记录缺少必要的筛选字段，未计入当前结果。')
+        parts.append(f'{unknown} 条记录缺少必要字段或语义依据尚未确认，未计入当前结果。')
+    if semantic.get('pending'):
+        parts.append(f"还有 {semantic['pending']} 条召回候选待判断，可继续查看；当前数量不是全库精确总数。")
     if page['returned']:
         parts.append(f"本次展示第 {page['offset']+1}—{page['offset']+page['returned']} 条。")
         columns=['姓名','当前机构','当前职务','领域','检索依据']
@@ -146,6 +156,8 @@ def render_search_answer(evidence, rows):
     elif total:
         parts.append('当前结果已展示完，没有下一页。')
     retrieval=evidence.get('retrieval',{})
+    if retrieval.get('vector_status')=='partial':
+        parts.append('部分记录缺少当前模型的可用向量，文本检索仍覆盖这些记录；语义召回可能不完整。')
     if retrieval.get('vector_status') in {'warming','busy','empty','unavailable','disabled'} and plan.get('topic_condition'):
         parts.append('语义召回暂未就绪，本次使用文本相关性检索。')
     if evidence.get('unreadable_files'):
@@ -165,7 +177,8 @@ def render_aggregate_answer(evidence):
     coverage=evidence.get('coverage', {})
     if coverage and (not coverage['complete'] or coverage['unknown'] or coverage.get('adjacent')):
         answer='以下为目前已确认的统计，不能视为全库精确总数。\n\n'+answer
-        answer+=f"\n\n已核验 {coverage['evaluated']} / {coverage['eligible']} 条，待处理 {coverage['pending']} 条，资料不足或核验失败 {coverage['unknown']} 条。"
+        progress="已扫描原文" if evidence.get("search_mode")=="hybrid" else "已核验"
+        answer+=f"\n\n{progress} {coverage['evaluated']} / {coverage['eligible']} 条，待处理 {coverage['pending']} 条，资料不足或核验失败 {coverage['unknown']} 条。"
         if coverage.get('adjacent'):
             answer+=f"其中 {coverage['adjacent']} 条只有相近主题依据，具体主题关联仍待确认。"
     answer += '\n\n统计口径：' + stats['basis']

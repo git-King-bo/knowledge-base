@@ -25,6 +25,24 @@ class SemanticContractTests(unittest.TestCase):
     def compile(self, data, question, previous=None):
         return compile_intent(data, question, sheets(), previous.model_dump() if previous else None)
 
+    def test_optional_facets_do_not_select_the_legacy_decoder(self):
+        import json
+        from app.services.talent_search import parse_model_plan
+        for data in [
+            {'operation':'count'},
+            {'operation':'distinct_count','field':'当前机构'},
+            {'operation':'group_count','field':'所在国家／城市'},
+            {'sort_by':'OpenAlex h-index'},
+            {'reset':True,'evidence':'重新开始'},
+        ]:
+            with self.subTest(data=data):
+                expected=self.compile(data,'重新开始')
+                self.assertEqual(parse_model_plan(json.dumps(data),sheets=sheets(),question='重新开始'),expected)
+        legacy=parse_model_plan('{"intent":"aggregate","operation":"count"}',sheets=sheets())
+        self.assertEqual(legacy.intent,'aggregate')
+        with self.assertRaises(ValueError):
+            parse_model_plan('{"facets":[],"invented":true}',sheets=sheets())
+
     def test_country_grammar_across_all_aliases_is_complete_and_grounded(self):
         for canonical, aliases in COUNTRY_ALIASES.items():
             for alias in aliases:
@@ -116,6 +134,27 @@ class SemanticApiTests(unittest.TestCase):
     setUp=workspace.WorkspaceTests.setUp
     tearDown=workspace.WorkspaceTests.tearDown
     base=workspace.WorkspaceTests.base
+
+    def test_operation_only_model_outputs_work_on_json_and_streaming_endpoints(self):
+        import json
+        from app.schemas.usage import ChatResult, TokenUsage
+        base=self.base();book=Workbook();sheet=book.active
+        sheet.append(['姓名','领域','当前机构','所在国家／城市'])
+        for row in [['A','alpha','Example University','美国'],['B','beta','Example University','英国'],['C','gamma','Other University','美国']]:
+            sheet.append(row)
+        output=io.BytesIO();book.save(output)
+        self.client.post(f'/api/knowledge/bases/{base}/upload',files={'file':('people.xlsx',output.getvalue(),'application/octet-stream')})
+        cases=[('一共多少人才',{'operation':'count'},'共 3 条'),
+               ('一共有多少人才',{'operation':'count'},'共 3 条'),
+               ('有多少个不同的当前机构',{'operation':'distinct_count','field':'当前机构'},'2 个不同'),
+               ('按当前所在地国家统计人数',{'operation':'group_count','field':'所在国家／城市'},'2 个不同')]
+        for endpoint in ['/api/knowledge/ask','/api/knowledge/ask/stream']:
+            for question,plan,expected in cases:
+                with self.subTest(endpoint=endpoint,question=question), patch.object(OpenAICompatibleProvider,'chat',
+                     return_value=ChatResult(content=json.dumps(plan),usage=TokenUsage())):
+                    response=self.client.post(endpoint,json={'question':question,'knowledge_base_id':base})
+                    self.assertEqual(response.status_code,200,response.text)
+                    self.assertIn(expected,response.text)
 
     def test_model_uses_typed_facets_and_receives_compact_schema(self):
         import json

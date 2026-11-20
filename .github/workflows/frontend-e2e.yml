@@ -1,0 +1,67 @@
+name: Frontend E2E
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        type: string
+        required: true
+      suite:
+        type: string
+        required: true
+      image:
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-frontend
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ inputs.image == '' && 'frontend/dist' || 'release' }}
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Start the exact release image
+        if: inputs.image != ''
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          cd release
+          sha256sum -c SHA256SUMS
+          docker load -i images.tar
+          docker run -d --name frontend-e2e -p 127.0.0.1:4173:8080 -e API_UPSTREAM=127.0.0.1:9 "$IMAGE"
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/version.json; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Run browser tests
+        working-directory: frontend
+        env:
+          SUITE: ${{ inputs.suite }}
+          E2E_BASE_URL: ${{ inputs.image != '' && 'http://127.0.0.1:4173' || '' }}
+        run: |
+          case "$SUITE" in
+            smoke) pnpm test:e2e:smoke ;;
+            full) pnpm test:e2e ;;
+            *) exit 1 ;;
+          esac
+      - name: Container logs
+        if: failure() && inputs.image != ''
+        run: docker logs frontend-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: frontend-e2e-${{ inputs.suite }}
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+      - if: always() && inputs.image != ''
+        run: docker rm -f frontend-e2e
