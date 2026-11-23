@@ -25,6 +25,14 @@ on:
       build_args:
         required: true
         type: string
+      registry_repository:
+        description: 'Full registry repository without tag; empty keeps archive delivery'
+        type: string
+        default: 'crpi-dy2oreopori9tcld.cn-shanghai.personal.cr.aliyuncs.com/wangbo-deploy/knowledge-base-frontend'
+      registry_username:
+        description: 'Registry login name; password is repository secret ACR_PASSWORD'
+        type: string
+        default: 'aliyun5531032824'
 permissions:
   contents: read
 concurrency:
@@ -103,3 +111,82 @@ jobs:
       image: ${{ needs.build.outputs.image }}
       commit: ${{ inputs.commit }}
       platform: ${{ inputs.platform }}
+  publish:
+    if: inputs.registry_repository != ''
+    needs: [build, e2e]
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      APPROVED_REGISTRY_REPOSITORY: crpi-dy2oreopori9tcld.cn-shanghai.personal.cr.aliyuncs.com/wangbo-deploy/knowledge-base-frontend
+      REGISTRY_REPOSITORY: ${{ inputs.registry_repository }}
+      REGISTRY_USERNAME: ${{ inputs.registry_username }}
+      REQUEST_ID: ${{ inputs.request_id }}
+      VERSION: ${{ inputs.version }}
+      COMMIT: ${{ inputs.commit }}
+      PLATFORM: ${{ inputs.platform }}
+      DOCKER_CONFIG: ${{ runner.temp }}/harborline-acr-auth
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: harborline-${{ inputs.request_id }}
+          path: release
+      - name: Validate tested image and registry settings
+        run: |
+          python3 - <<'PYTHON'
+          import hashlib, json, os, pathlib, re
+          env=os.environ
+          repository=env['REGISTRY_REPOSITORY']
+          assert env['APPROVED_REGISTRY_REPOSITORY'] and repository==env['APPROVED_REGISTRY_REPOSITORY'], 'Registry repository is not approved; refuse to send credentials'
+          assert re.fullmatch(r'[a-z0-9][a-z0-9.-]+(?::[0-9]+)?/[a-z0-9][a-z0-9._/-]*',repository), 'Invalid registry repository'
+          assert '..' not in repository and '//' not in repository
+          assert re.fullmatch(r'[a-f0-9]{24}',env['REQUEST_ID'])
+          assert re.fullmatch(r'[a-f0-9]{40}',env['COMMIT'])
+          assert re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,59}',env['VERSION'])
+          assert env['REGISTRY_USERNAME'], 'Registry username is required'
+          root=pathlib.Path('release')
+          manifest=json.loads((root/'manifest.json').read_text())
+          assert manifest['request_id']==env['REQUEST_ID'] and manifest['sha']==env['COMMIT'] and manifest['version']==env['VERSION']
+          assert manifest['image']=='harborline-build:'+env['REQUEST_ID']
+          with (root/'images.tar').open('rb') as f:actual=hashlib.file_digest(f,'sha256').hexdigest()
+          assert actual==manifest['sha256'], 'Image archive checksum mismatch'
+          PYTHON
+      - name: Log in to ACR
+        env:
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$ACR_PASSWORD" ]] || { echo '::error::Missing repository secret ACR_PASSWORD'; exit 1; }
+          install -d -m 700 "$DOCKER_CONFIG"
+          printf '%s' "$ACR_PASSWORD" | docker login "${REGISTRY_REPOSITORY%%/*}" --username "$REGISTRY_USERNAME" --password-stdin
+      - name: Push the exact image that passed checks
+        run: |
+          set -euo pipefail
+          docker load -i release/images.tar
+          tag="$VERSION-${COMMIT:0:12}-${REQUEST_ID:0:8}"
+          image="$REGISTRY_REPOSITORY:$tag"
+          docker tag "harborline-build:$REQUEST_ID" "$image"
+          docker push "$image"
+          docker image inspect "$image" --format '{{json .RepoDigests}}' > "$RUNNER_TEMP/registry-digests.json"
+          export REGISTRY_TAG="$image"
+          python3 - <<'PYTHON'
+          import json, os, pathlib, re
+          env=os.environ;repository=env['REGISTRY_REPOSITORY']
+          values=json.loads((pathlib.Path(env['RUNNER_TEMP'])/'registry-digests.json').read_text())
+          matches=[v for v in (values or []) if re.fullmatch(re.escape(repository)+r'@sha256:[a-f0-9]{64}',v)]
+          assert len(matches)==1, 'Cannot resolve the pushed image digest'
+          result={'request_id':env['REQUEST_ID'],'version':env['VERSION'],'sha':env['COMMIT'],
+                  'image':matches[0],'tag':env['REGISTRY_TAG'],'platform':env['PLATFORM']}
+          out=pathlib.Path('registry-output');out.mkdir()
+          (out/'manifest.json').write_text(json.dumps(result,indent=2)+'\n')
+          with open(env['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('### ACR image published\n\n`'+matches[0]+'`\n\nVersion: `'+env['VERSION']+'`\n\nThis workflow does not deploy to a server.\n')
+          PYTHON
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: harborline-registry-${{ inputs.request_id }}
+          path: registry-output/manifest.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Remove registry login
+        if: always()
+        run: docker logout "${REGISTRY_REPOSITORY%%/*}"
