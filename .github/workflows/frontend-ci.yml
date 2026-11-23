@@ -34,8 +34,24 @@ jobs:
               echo 'frontend=false' >> "$GITHUB_OUTPUT"
             fi
           fi
+  workflow_lint:
+    name: Validate GitHub Actions workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Check workflow expressions and job dependencies
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$archive"
+          printf '%s  %s\n' '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8' "$archive" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color -shellcheck='' -pyflakes=''
   quick:
-    needs: changes
+    needs: [changes, workflow_lint]
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -68,10 +84,11 @@ jobs:
   required:
     name: frontend-required
     if: always()
-    needs: [changes, quick, smoke]
+    needs: [changes, workflow_lint, quick, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
+      WORKFLOW_LINT: ${{ needs.workflow_lint.result }}
       CHANGES: ${{ needs.changes.result }}
       FRONTEND: ${{ needs.changes.outputs.frontend }}
       QUICK: ${{ needs.quick.result }}
@@ -79,6 +96,7 @@ jobs:
       EVENT: ${{ github.event_name }}
     steps:
       - run: |
+          [[ "$WORKFLOW_LINT" == success ]] || exit 1
           [[ "$CHANGES" == success ]]
           if [[ "$FRONTEND" == true ]]; then
             [[ "$QUICK" == success ]]
