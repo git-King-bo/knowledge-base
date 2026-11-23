@@ -106,10 +106,24 @@ jobs:
           IMAGE_ID: ${{ needs.build.outputs.image_id }}
         run: |
           set -euo pipefail
-          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
-          [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ && "$SSH_PORT" =~ ^[0-9]+$ ]]
-          [[ "$PUBLIC_URL" =~ ^https?://[A-Za-z0-9.:/-]+$ ]]
-          [[ -n "$SSH_KEY" && -n "$KNOWN_HOSTS" ]]
+          missing=0
+          for setting in SSH_HOST SSH_USER PUBLIC_URL SSH_KEY KNOWN_HOSTS; do
+            if [[ -z "${!setting}" ]]; then
+              case "$setting" in
+                PUBLIC_URL) config_name=FRONTEND_PUBLIC_URL ;;
+                SSH_KEY) config_name=FRONTEND_SSH_KEY ;;
+                KNOWN_HOSTS) config_name=FRONTEND_SSH_KNOWN_HOSTS ;;
+                *) config_name="FRONTEND_$setting" ;;
+              esac
+              echo "::error::Missing $config_name. Configure it in Settings > Environments > frontend-production."
+              missing=1
+            fi
+          done
+          [[ "$missing" == 0 ]]
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || { echo '::error::FRONTEND_SSH_HOST must be a hostname or IPv4, without a protocol or port.'; exit 1; }
+          [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo '::error::FRONTEND_SSH_USER is invalid.'; exit 1; }
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || { echo '::error::FRONTEND_SSH_PORT must be numeric.'; exit 1; }
+          [[ "$PUBLIC_URL" =~ ^https?://[A-Za-z0-9.:/-]+$ ]] || { echo '::error::FRONTEND_PUBLIC_URL must be an http(s) root URL without query parameters.'; exit 1; }
           install -d -m 700 "$HOME/.ssh"
           printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/frontend_key"
           printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"

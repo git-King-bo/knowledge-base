@@ -1,0 +1,105 @@
+name: Harborline Build
+run-name: Harborline ${{ inputs.request_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      commit:
+        required: true
+        type: string
+      dockerfile:
+        required: true
+        type: string
+      context:
+        required: true
+        type: string
+      platform:
+        required: true
+        type: choice
+        options: [linux/amd64, linux/arm64]
+      build_args:
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: harborline-build-${{ inputs.request_id }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 25
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - name: Build pinned commit and export one immutable image
+        id: build
+        env:
+          REQUEST_ID: ${{ inputs.request_id }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.context }}
+          PLATFORM: ${{ inputs.platform }}
+          BUILD_ARGS: ${{ inputs.build_args }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, subprocess
+          env=os.environ
+          request=env['REQUEST_ID'];version=env['VERSION'];sha=env['COMMIT']
+          assert re.fullmatch(r'[a-f0-9]{24}',request)
+          assert re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,59}',version)
+          assert re.fullmatch(r'[a-f0-9]{40}',sha)
+          actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert actual==sha, 'Checkout SHA differs from requested commit'
+          root=pathlib.Path.cwd().resolve()
+          for key in ['DOCKERFILE','CONTEXT']:
+              value=env[key];p=pathlib.Path(value)
+              assert not value.startswith('-') and not p.is_absolute() and '..' not in p.parts
+              assert p.resolve().is_relative_to(root), 'Build path leaves checkout'
+          assert env['PLATFORM'] in ('linux/amd64','linux/arm64')
+          image='harborline-build:'+request
+          args=['docker','build','--platform',env['PLATFORM'],'-f',env['DOCKERFILE'],'-t',image,
+                '--label','org.opencontainers.image.revision='+sha]
+          values=json.loads(env['BUILD_ARGS'])
+          assert isinstance(values,dict) and len(values)<=30
+          for k,v in values.items():
+              assert re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',k) and isinstance(v,str) and len(v)<=1024
+              args+=['--build-arg',k+'='+v]
+          subprocess.run(args+[env['CONTEXT']],check=True)
+          out=root/'harborline-output';out.mkdir()
+          archive=out/'images.tar'
+          subprocess.run(['docker','save','-o',str(archive),image],check=True)
+          with archive.open('rb') as f: checksum=hashlib.file_digest(f,'sha256').hexdigest()
+          (out/'manifest.json').write_text(json.dumps({'request_id':request,'version':version,'sha':sha,'image':image,'sha256':checksum}))
+          lines=[]
+          for file in [archive,out/'manifest.json']:
+              with file.open('rb') as f:lines.append(hashlib.file_digest(f,'sha256').hexdigest()+'  '+file.name)
+          (out/'SHA256SUMS').write_text('\n'.join(lines)+'\n')
+          with open(env['GITHUB_OUTPUT'],'a') as f:f.write('image='+image+'\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: harborline-${{ inputs.request_id }}
+          path: harborline-output/
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
+  e2e:
+    needs: build
+    uses: ./.github/workflows/frontend-e2e.yml
+    with:
+      artifact: harborline-${{ inputs.request_id }}
+      suite: full
+      image: ${{ needs.build.outputs.image }}
+      commit: ${{ inputs.commit }}
+      platform: ${{ inputs.platform }}

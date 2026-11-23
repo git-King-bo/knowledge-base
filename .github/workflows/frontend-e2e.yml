@@ -11,14 +11,22 @@ on:
       image:
         type: string
         default: ''
+      commit:
+        type: string
+        default: ''
+      platform:
+        type: string
+        default: linux/amd64
 permissions:
   contents: read
 jobs:
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - uses: ./.github/actions/setup-frontend
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
